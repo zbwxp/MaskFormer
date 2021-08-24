@@ -12,6 +12,7 @@ from detectron2.modeling import SEM_SEG_HEADS_REGISTRY
 
 from ..transformer.position_encoding import PositionEmbeddingSine
 from ..transformer.transformer import TransformerEncoder, TransformerEncoderLayer
+from .NRD_decoder import NRDDecoder
 
 
 def build_pixel_decoder(cfg, input_shape):
