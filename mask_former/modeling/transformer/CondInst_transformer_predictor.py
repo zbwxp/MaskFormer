@@ -202,7 +202,7 @@ class CondInstTransformerPredictor(nn.Module):
         mask_features = self.tower(mask_features)
         locations = compute_locations(h, w, stride=1, device=mask_features.device)
         locations = locations.reshape(1, 1, -1, 2).repeat(b, 1, 1, 1)
-        coords = out["pred_coords"].reshape(2, -1, 1, 2)
+        coords = out["pred_coords"].reshape(b, -1, 1, 2)
         relative_coords = coords - locations
         relative_coords = relative_coords.permute(0, 1, 3, 2).to(dtype=mask_features.dtype)
         mask_features = mask_features.reshape(b, self.low_level_in_channels, 1, -1) \
