@@ -78,6 +78,7 @@ class CondInstTransformerPredictor(nn.Module):
             deep_supervision: bool,
             mask_dim: int,
             enforce_input_project: bool,
+            use_all_coords: bool,
     ):
         """
         NOTE: this interface is experimental.
@@ -192,7 +193,8 @@ class CondInstTransformerPredictor(nn.Module):
             outputs_class = self.class_embed(hs)
             out = {"pred_logits": outputs_class[-1][:, :, :-2]}
             m = nn.Tanh()
-            out["pred_coords"] = m(outputs_class[-1][:, :, -2:])
+            outputs_coord = m(outputs_class[:, :, :, -2:])
+            out["pred_coords"] = outputs_coord[-1]
             outputs_class = outputs_class[:, :, :, :-2]
         else:
             out = {}
@@ -202,13 +204,6 @@ class CondInstTransformerPredictor(nn.Module):
         mask_features = self.tower(mask_features)
         locations = compute_locations(h, w, stride=1, device=mask_features.device)
         locations = locations.reshape(1, 1, -1, 2).repeat(b, 1, 1, 1)
-        coords = out["pred_coords"].reshape(b, -1, 1, 2)
-        relative_coords = coords - locations
-        relative_coords = relative_coords.permute(0, 1, 3, 2).to(dtype=mask_features.dtype)
-        mask_features = mask_features.reshape(b, self.low_level_in_channels, 1, -1) \
-            .permute(0, 2, 1, 3).repeat(1, n_inst, 1, 1)
-        mask_head_inputs = torch.cat([relative_coords, mask_features
-                                      ], dim=2).reshape(b, n_inst, -1, h, w)
 
         if self.aux_loss:
             # [l, bs, queries, embed]
@@ -221,13 +216,16 @@ class CondInstTransformerPredictor(nn.Module):
             num_heads = mask_embed.size()[0]
             outputs_seg_masks = []
             for i in range(num_heads):
+                coords = outputs_coord[i].reshape(b, -1, 1, 2)
+                mask_head_inputs = self.get_input_for_head(coords, locations, mask_features, n_inst)
                 mask_logits = self.mask_heads_forward(mask_head_inputs.reshape(1, -1, h, w),
                                                       weights, biases, n_inst*b, i).reshape(b, n_inst, h, w)
                 outputs_seg_masks.append(mask_logits)
-            outputs_seg_masks = torch.stack(outputs_seg_masks, dim=0)
+            # outputs_seg_masks = torch.stack(outputs_seg_masks, dim=0)
             out["pred_masks"] = outputs_seg_masks[-1]
             out["aux_outputs"] = self._set_aux_loss(
-                outputs_class if self.mask_classification else None, outputs_seg_masks
+                outputs_class if self.mask_classification else None, outputs_seg_masks,
+                outputs_coord
             )
         else:
             # FIXME h_boxes takes the last one computed, keep this in mind
@@ -238,21 +236,33 @@ class CondInstTransformerPredictor(nn.Module):
                 mask_embed.unsqueeze(0), self.dyn_channels,
                 self.weight_nums, self.bias_nums
             )
+            coords = outputs_coord[-1].reshape(b, -1, 1, 2)
+            mask_head_inputs = self.get_input_for_head(coords, locations, mask_features, n_inst)
             mask_logits = self.mask_heads_forward(mask_head_inputs.reshape(1, -1, h, w),
                                                   weights, biases, n_inst * b, -1).reshape(b, n_inst, h, w)
             outputs_seg_masks = mask_logits
             out["pred_masks"] = outputs_seg_masks
         return out
 
+    def get_input_for_head(self, coords, locations, mask_features, n_inst):
+        b, c, h, w = mask_features.size()
+        relative_coords = coords - locations
+        relative_coords = relative_coords.permute(0, 1, 3, 2).to(dtype=mask_features.dtype)
+        mask_features = mask_features.reshape(b, self.low_level_in_channels, 1, -1) \
+            .permute(0, 2, 1, 3).repeat(1, n_inst, 1, 1)
+        mask_head_inputs = torch.cat([relative_coords, mask_features
+                                      ], dim=2).reshape(b, n_inst, -1, h, w)
+        return mask_head_inputs
+
     @torch.jit.unused
-    def _set_aux_loss(self, outputs_class, outputs_seg_masks):
+    def _set_aux_loss(self, outputs_class, outputs_seg_masks, outputs_seg_coords):
         # this is a workaround to make torchscript happy, as torchscript
         # doesn't support dictionary with non-homogeneous values, such
         # as a dict having both a Tensor and a list.
         if self.mask_classification:
             return [
-                {"pred_logits": a, "pred_masks": b}
-                for a, b in zip(outputs_class[:-1], outputs_seg_masks[:-1])
+                {"pred_logits": a, "pred_masks": b, "pred_coords": c}
+                for a, b, c in zip(outputs_class[:-1], outputs_seg_masks[:-1], outputs_seg_coords[:-1])
             ]
         else:
             return [{"pred_masks": b} for b in outputs_seg_masks[:-1]]
