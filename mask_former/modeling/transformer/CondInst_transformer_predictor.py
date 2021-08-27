@@ -78,7 +78,6 @@ class CondInstTransformerPredictor(nn.Module):
             deep_supervision: bool,
             mask_dim: int,
             enforce_input_project: bool,
-            use_all_coords: bool,
     ):
         """
         NOTE: this interface is experimental.
