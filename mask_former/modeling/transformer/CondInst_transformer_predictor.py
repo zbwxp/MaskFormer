@@ -191,7 +191,7 @@ class CondInstTransformerPredictor(nn.Module):
         if self.mask_classification:
             outputs_class = self.class_embed(hs)
             out = {"pred_logits": outputs_class[-1][:, :, :-2]}
-            m = nn.Tanh()
+            m = nn.Sigmoid()
             outputs_coord = m(outputs_class[:, :, :, -2:])
             out["pred_coords"] = outputs_coord[-1]
             outputs_class = outputs_class[:, :, :, :-2]
