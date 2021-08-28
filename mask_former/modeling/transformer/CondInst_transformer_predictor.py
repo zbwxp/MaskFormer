@@ -141,7 +141,7 @@ class CondInstTransformerPredictor(nn.Module):
         self.dyn_channels = 8
         self.weight_nums = [80, 64, 8]
         self.bias_nums = [8, 8, 1]
-        conv_block = conv_with_kaiming_uniform('BN', activation=True)
+        conv_block = conv_with_kaiming_uniform('GN', activation=True)
         tower = []
         channels = 128
         tower.append(conv_block(
