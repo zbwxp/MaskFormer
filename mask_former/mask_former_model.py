@@ -38,6 +38,8 @@ class MaskFormer(nn.Module):
         sem_seg_postprocess_before_inference: bool,
         pixel_mean: Tuple[float],
         pixel_std: Tuple[float],
+        regress_coords: bool,
+        max_iter: int,
     ):
         """
         Args:
@@ -76,6 +78,9 @@ class MaskFormer(nn.Module):
         self.sem_seg_postprocess_before_inference = sem_seg_postprocess_before_inference
         self.register_buffer("pixel_mean", torch.Tensor(pixel_mean).view(-1, 1, 1), False)
         self.register_buffer("pixel_std", torch.Tensor(pixel_std).view(-1, 1, 1), False)
+        self.regress_coords = regress_coords
+        self.register_buffer("_iter", torch.zeros([1]))
+        self.max_iter = max_iter
 
     @classmethod
     def from_config(cls, cfg):
@@ -87,6 +92,7 @@ class MaskFormer(nn.Module):
         no_object_weight = cfg.MODEL.MASK_FORMER.NO_OBJECT_WEIGHT
         dice_weight = cfg.MODEL.MASK_FORMER.DICE_WEIGHT
         mask_weight = cfg.MODEL.MASK_FORMER.MASK_WEIGHT
+        coord_weight = cfg.MODEL.MASK_FORMER.COORD_WEIGHT
 
         # building criterion
         matcher = HungarianMatcher(
@@ -96,6 +102,8 @@ class MaskFormer(nn.Module):
         )
 
         weight_dict = {"loss_ce": 1, "loss_mask": mask_weight, "loss_dice": dice_weight}
+        if coord_weight is not None:
+            weight_dict.update({"loss_coord": coord_weight})
         if deep_supervision:
             dec_layers = cfg.MODEL.MASK_FORMER.DEC_LAYERS
             aux_weight_dict = {}
@@ -104,6 +112,8 @@ class MaskFormer(nn.Module):
             weight_dict.update(aux_weight_dict)
 
         losses = ["labels", "masks"]
+        if coord_weight is not None:
+            losses.append("coords")
 
         criterion = SetCriterion(
             sem_seg_head.num_classes,
@@ -129,6 +139,8 @@ class MaskFormer(nn.Module):
             ),
             "pixel_mean": cfg.MODEL.PIXEL_MEAN,
             "pixel_std": cfg.MODEL.PIXEL_STD,
+            "regress_coords": cfg.MODEL.MASK_FORMER.REGRESS_COORDS,
+            "max_iter": cfg.SOLVER.MAX_ITER
         }
 
     @property
@@ -169,10 +181,13 @@ class MaskFormer(nn.Module):
         outputs = self.sem_seg_head(features)
 
         if self.training:
+            self._iter += 1
             # mask classification target
             if "instances" in batched_inputs[0]:
                 gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
                 targets = self.prepare_targets(gt_instances, images)
+                if self.regress_coords:
+                    self.add_coords_targets(targets)
             else:
                 targets = None
 
@@ -182,6 +197,10 @@ class MaskFormer(nn.Module):
             for k in list(losses.keys()):
                 if k in self.criterion.weight_dict:
                     losses[k] *= self.criterion.weight_dict[k]
+                    # let the loss_coord decay as iteration grows
+                    if "loss_coord" in k:
+                        losses[k] *= max(((self.max_iter - self._iter.item()) / self.max_iter)**2, 0)
+                        # print("loss_coord decay:", max((self.max_iter - self._iter.item()) / self.max_iter, 0))
                 else:
                     # remove this loss if not specified in `weight_dict`
                     losses.pop(k)
@@ -222,6 +241,21 @@ class MaskFormer(nn.Module):
                     processed_results[-1]["panoptic_seg"] = panoptic_r
 
             return processed_results
+
+    def add_coords_targets(self, targets):
+        bitmasks = [target['masks'] for target in targets]
+        for i, bitmasks_per_image in enumerate(bitmasks):
+            _, h, w = bitmasks_per_image.size()
+
+            ys = torch.arange(0, h, dtype=torch.float32, device=bitmasks_per_image.device)
+            xs = torch.arange(0, w, dtype=torch.float32, device=bitmasks_per_image.device)
+
+            m00 = bitmasks_per_image.sum(dim=-1).sum(dim=-1).clamp(min=1e-6)
+            m10 = (bitmasks_per_image * xs).sum(dim=-1).sum(dim=-1)
+            m01 = (bitmasks_per_image * ys[:, None]).sum(dim=-1).sum(dim=-1)
+            center_x = m10 / m00 / (w-1.0)
+            center_y = m01 / m00 / (h-1.0)
+            targets[i]['coords'] = torch.stack([center_x, center_y], dim=-1)
 
     def prepare_targets(self, targets, images):
         h, w = images.tensor.shape[-2:]

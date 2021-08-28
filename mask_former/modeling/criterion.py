@@ -132,6 +132,21 @@ class SetCriterion(nn.Module):
         }
         return losses
 
+    def loss_coords(self, outputs, targets, indices, num_masks):
+        assert "pred_coords" in outputs
+        src_idx = self._get_src_permutation_idx(indices)
+        tgt_idx = self._get_tgt_permutation_idx(indices)
+        src_coords = outputs["pred_coords"]
+        src_coords = src_coords[src_idx]
+        tgt_coords = [t["coords"] for t in targets]
+        for i_img in tgt_idx[0].unique():
+            tgt_coords[i_img] = tgt_coords[i_img][tgt_idx[1][tgt_idx[0] == i_img]]
+        tgt_coords = torch.cat(tgt_coords)
+        loss_ce = F.binary_cross_entropy(src_coords, tgt_coords, reduction='none')
+        losses = {"loss_coord": loss_ce.sum() / num_masks}
+
+        return losses
+
     def _get_src_permutation_idx(self, indices):
         # permute predictions following indices
         batch_idx = torch.cat([torch.full_like(src, i) for i, (src, _) in enumerate(indices)])
@@ -145,7 +160,7 @@ class SetCriterion(nn.Module):
         return batch_idx, tgt_idx
 
     def get_loss(self, loss, outputs, targets, indices, num_masks):
-        loss_map = {"labels": self.loss_labels, "masks": self.loss_masks}
+        loss_map = {"labels": self.loss_labels, "masks": self.loss_masks, "coords": self.loss_coords}
         assert loss in loss_map, f"do you really want to compute {loss} loss?"
         return loss_map[loss](outputs, targets, indices, num_masks)
 
