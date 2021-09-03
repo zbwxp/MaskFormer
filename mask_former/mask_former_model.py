@@ -252,6 +252,7 @@ class MaskFormer(nn.Module):
                     n_inst = per_im_masks.size(0)
                     if n_inst == 0:
                         print("got zero instance per img!!!!!!!!!!")
+                        continue
                     per_im_mask_weights = per_im_masks.reshape(n_inst, -1).sum(dim=-1)
                     # memory saving loop
                     for i_inst in range(n_inst):
