@@ -35,6 +35,9 @@ def add_mask_former_config(cfg):
     cfg.MODEL.MASK_FORMER.MASK_WEIGHT = 20.0
     cfg.MODEL.MASK_FORMER.REGRESS_COORDS = False
     cfg.MODEL.MASK_FORMER.COORD_WEIGHT = None
+    cfg.MODEL.MASK_FORMER.ENTITY = False
+    cfg.MODEL.MASK_FORMER.ENTITY_WEIGHT = None
+    cfg.MODEL.MASK_FORMER.ENTITY_CLS_TOWER_NORM = 'GN'
 
     # transformer config
     cfg.MODEL.MASK_FORMER.NHEADS = 8
@@ -49,6 +52,7 @@ def add_mask_former_config(cfg):
 
     cfg.MODEL.MASK_FORMER.TRANSFORMER_IN_FEATURE = "res5"
     cfg.MODEL.MASK_FORMER.ENFORCE_INPUT_PROJ = False
+    cfg.MODEL.MASK_FORMER.MATCHER = "HungarianMatcher"
 
     # mask_former inference config
     cfg.MODEL.MASK_FORMER.TEST = CN()

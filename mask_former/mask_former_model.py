@@ -11,9 +11,12 @@ from detectron2.modeling import META_ARCH_REGISTRY, build_backbone, build_sem_se
 from detectron2.modeling.backbone import Backbone
 from detectron2.modeling.postprocessing import sem_seg_postprocess
 from detectron2.structures import ImageList
+from .utils.misc import nested_tensor_from_tensor_list
 
 from .modeling.criterion import SetCriterion
 from .modeling.matcher import HungarianMatcher
+from .modeling.entity_matcher import EntityHungarianMatcher
+import matplotlib.pyplot as plt
 
 
 @META_ARCH_REGISTRY.register()
@@ -24,22 +27,26 @@ class MaskFormer(nn.Module):
 
     @configurable
     def __init__(
-        self,
-        *,
-        backbone: Backbone,
-        sem_seg_head: nn.Module,
-        criterion: nn.Module,
-        num_queries: int,
-        panoptic_on: bool,
-        object_mask_threshold: float,
-        overlap_threshold: float,
-        metadata,
-        size_divisibility: int,
-        sem_seg_postprocess_before_inference: bool,
-        pixel_mean: Tuple[float],
-        pixel_std: Tuple[float],
-        regress_coords: bool,
-        max_iter: int,
+            self,
+            *,
+            backbone: Backbone,
+            sem_seg_head: nn.Module,
+            criterion: nn.Module,
+            num_queries: int,
+            panoptic_on: bool,
+            object_mask_threshold: float,
+            overlap_threshold: float,
+            metadata,
+            size_divisibility: int,
+            sem_seg_postprocess_before_inference: bool,
+            pixel_mean: Tuple[float],
+            pixel_std: Tuple[float],
+            regress_coords: bool,
+            max_iter: int,
+            entity: bool,
+            num_classes: int,
+            hidden_dim: int,
+            entity_criterion: nn.Module,
     ):
         """
         Args:
@@ -79,8 +86,13 @@ class MaskFormer(nn.Module):
         self.register_buffer("pixel_mean", torch.Tensor(pixel_mean).view(-1, 1, 1), False)
         self.register_buffer("pixel_std", torch.Tensor(pixel_std).view(-1, 1, 1), False)
         self.regress_coords = regress_coords
+        self.entity = entity
         self.register_buffer("_iter", torch.zeros([1]))
         self.max_iter = max_iter
+
+        if self.entity:
+            self.cls_head = nn.Linear(hidden_dim, num_classes)
+            self.entity_criterion = entity_criterion
 
     @classmethod
     def from_config(cls, cfg):
@@ -93,17 +105,31 @@ class MaskFormer(nn.Module):
         dice_weight = cfg.MODEL.MASK_FORMER.DICE_WEIGHT
         mask_weight = cfg.MODEL.MASK_FORMER.MASK_WEIGHT
         coord_weight = cfg.MODEL.MASK_FORMER.COORD_WEIGHT
+        matcher_name = cfg.MODEL.MASK_FORMER.MATCHER
+        entity_weight = cfg.MODEL.MASK_FORMER.ENTITY_WEIGHT
+        entity = cfg.MODEL.MASK_FORMER.ENTITY
 
         # building criterion
-        matcher = HungarianMatcher(
-            cost_class=1,
-            cost_mask=mask_weight,
-            cost_dice=dice_weight,
-        )
+        if matcher_name == "HungarianMatcher":
+            matcher = HungarianMatcher(
+                cost_class=1,
+                cost_mask=mask_weight,
+                cost_dice=dice_weight,
+            )
+        elif matcher_name == "EntityHungarianMatcher":
+            matcher = EntityHungarianMatcher(
+                cost_class=1,
+                cost_mask=mask_weight,
+                cost_dice=dice_weight,
+            )
+        else:
+            raise AssertionError('The matcher: ', matcher_name, 'is not implemented!!')
 
         weight_dict = {"loss_ce": 1, "loss_mask": mask_weight, "loss_dice": dice_weight}
         if coord_weight is not None:
             weight_dict.update({"loss_coord": coord_weight})
+        if entity_weight is not None:
+            weight_dict.update({"loss_ce_entity": entity_weight})
         if deep_supervision:
             dec_layers = cfg.MODEL.MASK_FORMER.DEC_LAYERS
             aux_weight_dict = {}
@@ -114,6 +140,9 @@ class MaskFormer(nn.Module):
         losses = ["labels", "masks"]
         if coord_weight is not None:
             losses.append("coords")
+        if matcher_name == "EntityHungarianMatcher":
+            losses.remove("labels")
+            losses.append("entity")
 
         criterion = SetCriterion(
             sem_seg_head.num_classes,
@@ -122,6 +151,15 @@ class MaskFormer(nn.Module):
             eos_coef=no_object_weight,
             losses=losses,
         )
+        entity_criterion = None
+        if entity:
+            entity_criterion = SetCriterion(
+                sem_seg_head.num_classes,
+                matcher=matcher,
+                weight_dict={"loss_entity_cls": 1},
+                eos_coef=no_object_weight,
+                losses=["entity_cls"],
+            )
 
         return {
             "backbone": backbone,
@@ -134,13 +172,17 @@ class MaskFormer(nn.Module):
             "metadata": MetadataCatalog.get(cfg.DATASETS.TRAIN[0]),
             "size_divisibility": cfg.MODEL.MASK_FORMER.SIZE_DIVISIBILITY,
             "sem_seg_postprocess_before_inference": (
-                cfg.MODEL.MASK_FORMER.TEST.SEM_SEG_POSTPROCESSING_BEFORE_INFERENCE
-                or cfg.MODEL.MASK_FORMER.TEST.PANOPTIC_ON
+                    cfg.MODEL.MASK_FORMER.TEST.SEM_SEG_POSTPROCESSING_BEFORE_INFERENCE
+                    or cfg.MODEL.MASK_FORMER.TEST.PANOPTIC_ON
             ),
             "pixel_mean": cfg.MODEL.PIXEL_MEAN,
             "pixel_std": cfg.MODEL.PIXEL_STD,
             "regress_coords": cfg.MODEL.MASK_FORMER.REGRESS_COORDS,
-            "max_iter": cfg.SOLVER.MAX_ITER
+            "max_iter": cfg.SOLVER.MAX_ITER,
+            "entity": cfg.MODEL.MASK_FORMER.ENTITY,
+            "num_classes": cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES,
+            "hidden_dim": cfg.MODEL.MASK_FORMER.HIDDEN_DIM,
+            "entity_criterion": entity_criterion
         }
 
     @property
@@ -194,13 +236,43 @@ class MaskFormer(nn.Module):
             # bipartite matching-based loss
             losses = self.criterion(outputs, targets)
 
+            if self.entity:
+                entity_cls_logits = outputs["entity_cls_logits"]
+                labels = [t["labels"] for t in targets]
+                masks = [t["masks"] for t in targets]
+                bs = len(masks)
+                ch = entity_cls_logits.size(1)
+                _, h, w = masks[0].size()
+                entity_cls_logits = F.interpolate(entity_cls_logits, size=[h, w],
+                                          mode="bilinear", align_corners=False)
+
+                masked_avg_pool = []
+                for b in range(bs):
+                    per_im_masks = masks[b].float()
+                    n_inst = per_im_masks.size(0)
+                    per_im_mask_weights = per_im_masks.reshape(n_inst, -1).sum(dim=-1)
+                    # memory saving loop
+                    for i_inst in range(n_inst):
+                        masked_logits = entity_cls_logits[b] * per_im_masks[i_inst][None, :]
+                        masked_avg_pool.append(
+                            masked_logits.reshape(ch, -1).sum(dim=-1) / (per_im_mask_weights[i_inst] + 1.0))
+
+                masked_avg_pool = torch.stack(masked_avg_pool)
+                labels = torch.cat(labels)
+                cls_preds = self.cls_head(masked_avg_pool)
+
+                loss_entity_cls = F.cross_entropy(cls_preds, labels)
+                losses.update({"loss_entity_cls": loss_entity_cls})
+
             for k in list(losses.keys()):
                 if k in self.criterion.weight_dict:
                     losses[k] *= self.criterion.weight_dict[k]
                     # let the loss_coord decay as iteration grows
                     if "loss_coord" in k:
-                        losses[k] *= max(((self.max_iter - self._iter.item()) / self.max_iter)**2, 0)
+                        losses[k] *= max(((self.max_iter - self._iter.item()) / self.max_iter) ** 2, 0)
                         # print("loss_coord decay:", max((self.max_iter - self._iter.item()) / self.max_iter, 0))
+                elif k in self.entity_criterion.weight_dict:
+                    losses[k] *= self.entity_criterion.weight_dict[k]
                 else:
                     # remove this loss if not specified in `weight_dict`
                     losses.pop(k)
@@ -219,7 +291,7 @@ class MaskFormer(nn.Module):
 
             processed_results = []
             for mask_cls_result, mask_pred_result, input_per_image, image_size in zip(
-                mask_cls_results, mask_pred_results, batched_inputs, images.image_sizes
+                    mask_cls_results, mask_pred_results, batched_inputs, images.image_sizes
             ):
                 height = input_per_image.get("height", image_size[0])
                 width = input_per_image.get("width", image_size[1])
@@ -253,8 +325,8 @@ class MaskFormer(nn.Module):
             m00 = bitmasks_per_image.sum(dim=-1).sum(dim=-1).clamp(min=1e-6)
             m10 = (bitmasks_per_image * xs).sum(dim=-1).sum(dim=-1)
             m01 = (bitmasks_per_image * ys[:, None]).sum(dim=-1).sum(dim=-1)
-            center_x = m10 / m00 / (w-1.0)
-            center_y = m01 / m00 / (h-1.0)
+            center_x = m10 / m00 / (w - 1.0)
+            center_y = m01 / m00 / (h - 1.0)
             targets[i]['coords'] = torch.stack([center_x, center_y], dim=-1)
 
     def prepare_targets(self, targets, images):

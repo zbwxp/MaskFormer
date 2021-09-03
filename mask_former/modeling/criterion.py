@@ -102,6 +102,42 @@ class SetCriterion(nn.Module):
         losses = {"loss_ce": loss_ce}
         return losses
 
+    def loss_entity_cls(self, outputs, targets, indices, num_masks):
+        """Classification loss (NLL)
+        targets dicts must contain the key "labels" containing a tensor of dim [nb_target_boxes]
+        """
+        assert "pred_entity_cls" in outputs
+        src_logits = outputs["pred_entity_cls"]
+
+        idx = self._get_src_permutation_idx(indices)
+        target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)])
+        target_classes = torch.full(
+            src_logits.shape[:2], self.num_classes, dtype=torch.int64, device=src_logits.device
+        )
+        target_classes[idx] = target_classes_o
+
+        loss_ce = F.cross_entropy(src_logits.transpose(1, 2),
+                                  target_classes, self.empty_weight, ignore_index=self.num_classes)
+        losses = {"loss_entity_cls": loss_ce}
+        return losses
+
+    def loss_entity(self, outputs, targets, indices, num_masks):
+        """Classification loss (NLL)
+        targets dicts must contain the key "labels" containing a tensor of dim [nb_target_boxes]
+        """
+        assert "pred_logits" in outputs
+        src_logits = outputs["pred_logits"].squeeze(-1)
+        b, n_inst = src_logits.shape
+
+        idx = self._get_src_permutation_idx(indices)
+        target_classes = torch.zeros_like(src_logits)
+        target_classes[idx] = 1.0
+
+        loss_ce_entity = F.binary_cross_entropy_with_logits(src_logits, target_classes)
+        losses = {"loss_ce_entity": loss_ce_entity}
+
+        return losses
+
     def loss_masks(self, outputs, targets, indices, num_masks):
         """Compute the losses related to the masks: the focal loss and the dice loss.
         targets dicts must contain the key "masks" containing a tensor of dim [nb_target_boxes, h, w]
@@ -160,11 +196,15 @@ class SetCriterion(nn.Module):
         return batch_idx, tgt_idx
 
     def get_loss(self, loss, outputs, targets, indices, num_masks):
-        loss_map = {"labels": self.loss_labels, "masks": self.loss_masks, "coords": self.loss_coords}
+        loss_map = {"labels": self.loss_labels,
+                    "masks": self.loss_masks,
+                    "coords": self.loss_coords,
+                    "entity": self.loss_entity,
+                    "entity_cls": self.loss_entity_cls}
         assert loss in loss_map, f"do you really want to compute {loss} loss?"
         return loss_map[loss](outputs, targets, indices, num_masks)
 
-    def forward(self, outputs, targets):
+    def forward(self, outputs, targets, indices=None):
         """This performs the loss computation.
         Parameters:
              outputs: dict of tensors, see the output specification of the model for the format
