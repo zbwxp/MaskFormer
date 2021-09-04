@@ -242,30 +242,30 @@ class MaskFormer(nn.Module):
                 masks = [t["masks"] for t in targets]
                 bs = len(masks)
                 ch = entity_cls_logits.size(1)
-                _, h, w = masks[0].size()
+                h, w = outputs["pred_masks"].size()[-2:]
                 entity_cls_logits = F.interpolate(entity_cls_logits, size=[h, w],
-                                          mode="bilinear", align_corners=False)
-
+                                                  mode="bilinear", align_corners=False)
                 masked_avg_pool = []
                 for b in range(bs):
-                    per_im_masks = masks[b].float()
-                    n_inst = per_im_masks.size(0)
+                    n_inst = masks[b].size(0)
                     if n_inst == 0:
                         print("got zero instance per img!!!!!!!!!!")
                         continue
+                    per_im_masks = F.interpolate(masks[b].unsqueeze(0).float(), size=[h, w],
+                                                 mode="bilinear", align_corners=False)
                     per_im_mask_weights = per_im_masks.reshape(n_inst, -1).sum(dim=-1)
-                    # memory saving loop
-                    for i_inst in range(n_inst):
-                        masked_logits = entity_cls_logits[b] * per_im_masks[i_inst][None, :]
-                        masked_avg_pool.append(
-                            masked_logits.reshape(ch, -1).sum(dim=-1) / (per_im_mask_weights[i_inst] + 1.0))
+                    masked_avg_pool.append(((entity_cls_logits[b].unsqueeze(1)
+                                             * per_im_masks).reshape(ch, n_inst, -1)
+                                            .sum(dim=-1) / (per_im_mask_weights[None, :] + 1.0))
+                                           .permute(1, 0))
 
-                masked_avg_pool = torch.stack(masked_avg_pool)
-                labels = torch.cat(labels)
-                cls_preds = self.cls_head(masked_avg_pool)
+                if not masked_avg_pool == []:
+                    masked_avg_pool = torch.cat(masked_avg_pool)
+                    labels = torch.cat(labels)
+                    cls_preds = self.cls_head(masked_avg_pool)
 
-                loss_entity_cls = F.cross_entropy(cls_preds, labels)
-                losses.update({"loss_entity_cls": loss_entity_cls})
+                    loss_entity_cls = F.cross_entropy(cls_preds, labels)
+                    losses.update({"loss_entity_cls": loss_entity_cls})
 
             for k in list(losses.keys()):
                 if k in self.criterion.weight_dict:
@@ -284,6 +284,31 @@ class MaskFormer(nn.Module):
         else:
             mask_cls_results = outputs["pred_logits"]
             mask_pred_results = outputs["pred_masks"]
+            processed_results = []
+            if self.entity:
+                mask_pred_entity_cls_logits = outputs["entity_cls_logits"]
+                for mask_cls_result, mask_pred_result, input_per_image, \
+                    image_size, per_im_entity_cls_logits in zip(
+                    mask_cls_results, mask_pred_results, batched_inputs,
+                    images.image_sizes, mask_pred_entity_cls_logits
+                ):
+                    height = input_per_image.get("height", image_size[0])
+                    width = input_per_image.get("width", image_size[1])
+                    r = self.entity_semantic_inference(mask_cls_result, mask_pred_result, per_im_entity_cls_logits)
+                    r = F.interpolate(
+                        mask_pred_results,
+                        size=(images.tensor.shape[-2], images.tensor.shape[-1]),
+                        mode="bilinear",
+                        align_corners=False,
+                    )
+                    if not self.sem_seg_postprocess_before_inference:
+                        r = sem_seg_postprocess(r, image_size, height, width)
+
+                    processed_results.append({"sem_seg": r})
+
+                return processed_results
+
+
             # upsample masks
             mask_pred_results = F.interpolate(
                 mask_pred_results,
@@ -292,7 +317,7 @@ class MaskFormer(nn.Module):
                 align_corners=False,
             )
 
-            processed_results = []
+
             for mask_cls_result, mask_pred_result, input_per_image, image_size in zip(
                     mask_cls_results, mask_pred_results, batched_inputs, images.image_sizes
             ):
@@ -340,13 +365,41 @@ class MaskFormer(nn.Module):
             gt_masks = targets_per_image.gt_masks
             padded_masks = torch.zeros((gt_masks.shape[0], h, w), dtype=gt_masks.dtype, device=gt_masks.device)
             padded_masks[:, : gt_masks.shape[1], : gt_masks.shape[2]] = gt_masks
+            masks_sum = padded_masks.flatten(-2, -1).sum(dim=-1)
+            valid_masks = masks_sum != 0
             new_targets.append(
                 {
-                    "labels": targets_per_image.gt_classes,
-                    "masks": padded_masks,
+                    "labels": targets_per_image.gt_classes[valid_masks],
+                    "masks": padded_masks[valid_masks],
                 }
             )
         return new_targets
+
+    def entity_semantic_inference(self, entity_score, mask_pred, cls_logits):
+        device = self.device
+        ch = cls_logits.size(0)
+        h, w = mask_pred.size()[-2:]
+        mask_pred = mask_pred.sigmoid()
+        # upsample cls_logits
+        cls_logits = F.interpolate(cls_logits.unsqueeze(0), size=[h, w],
+                                   mode="bilinear", align_corners=False)
+        # use all preds
+        keep_pred = mask_pred
+        n_inst = keep_pred.size(0)
+        keep_pred_weights = keep_pred.flatten(-2, -1).sum(dim=-1)
+        masked_avg_pool = (cls_logits * keep_pred.unsqueeze(1)) \
+                              .flatten(-2, -1).sum(dim=-1) / \
+                          (keep_pred_weights[:, None] + 1.0)
+        cls_pred = self.cls_head(masked_avg_pool).argmax(dim=-1)
+
+        # overlap the output by reverse sorted order
+        # naive output!!!!!!!!
+        sorted, indices = entity_score.sort(0)
+        output = torch.zeros([self.sem_seg_head.num_classes, h, w], device=device)
+        for indice in indices:
+            output[cls_pred[indice]] = mask_pred[indice]
+
+        return output
 
     def semantic_inference(self, mask_cls, mask_pred):
         mask_cls = F.softmax(mask_cls, dim=-1)[..., :-1]

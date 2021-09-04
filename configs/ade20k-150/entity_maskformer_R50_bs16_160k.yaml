@@ -28,10 +28,13 @@ MODEL:
     MATCHER: "EntityHungarianMatcher"
     ENTITY: True
     ENTITY_WEIGHT: 1.0
+    TEST:
+      OVERLAP_THRESHOLD: 0.8
+      OBJECT_MASK_THRESHOLD: 0.7
 INPUT:
   DATASET_MAPPER_NAME: "mask_former_panoptic"
 DATASETS:
   TRAIN: ("ade20k_panoptic_train",)
   TEST: ("ade20k_panoptic_val",)
 TEST:
-  EVAL_PERIOD: 0  # inference not implemented yet
+  EVAL_PERIOD: 2000  # naivegit inference

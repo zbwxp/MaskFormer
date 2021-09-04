@@ -58,6 +58,8 @@ class Trainer(DefaultTrainer):
         if output_folder is None:
             output_folder = os.path.join(cfg.OUTPUT_DIR, "inference")
         evaluator_list = []
+        if cfg.MODEL.MASK_FORMER.ENTITY:
+            dataset_name = "ade20k_sem_seg_val"
         evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
         if evaluator_type in ["sem_seg", "ade20k_panoptic_seg"]:
             evaluator_list.append(

@@ -12,8 +12,14 @@ from detectron2.data import transforms as T
 from detectron2.structures import BitMasks, Instances
 
 from .mask_former_semantic_dataset_mapper import MaskFormerSemanticDatasetMapper
+import matplotlib.pyplot as plt
 
 __all__ = ["MaskFormerPanopticDatasetMapper"]
+
+
+def uni_colors(img):
+    new = img[:, :, 0] * 0.214 + img[:, :, 1] * 0.178 + img[:, :, 2] * 0.845
+    return np.unique(new), len(np.unique(new))
 
 
 class MaskFormerPanopticDatasetMapper(MaskFormerSemanticDatasetMapper):
@@ -146,6 +152,9 @@ class MaskFormerPanopticDatasetMapper(MaskFormerSemanticDatasetMapper):
         for segment_info in segments_info:
             class_id = segment_info["category_id"]
             if not segment_info["iscrowd"]:
+                # check if this segment is still in image after augmentation
+                if (pan_seg_gt == segment_info["id"]).sum() == 0:
+                    continue
                 classes.append(class_id)
                 masks.append(pan_seg_gt == segment_info["id"])
 
