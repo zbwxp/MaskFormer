@@ -112,27 +112,7 @@ class EntityTransformerPredictor(nn.Module):
                 norm=tower_norm,
                 activation=F.relu,
             ),
-            Conv2d(
-                hidden_dim,
-                hidden_dim,
-                kernel_size=3,
-                stride=1,
-                padding=1,
-                bias=False,
-                norm=tower_norm,
-                activation=F.relu,
-            ),
-            Conv2d(
-                hidden_dim,
-                hidden_dim,
-                kernel_size=3,
-                stride=1,
-                padding=1,
-                bias=False,
-                norm=tower_norm,
-                activation=F.relu,
-            ),
-        )
+            )
         for conv in self.cls_tower:
             weight_init.c2_xavier_fill(conv)
 
@@ -173,7 +153,7 @@ class EntityTransformerPredictor(nn.Module):
             out = {"pred_logits": outputs_class[-1]}
         else:
             out = {}
-        cls_logits = self.cls_tower(input_proj)
+        cls_logits = self.cls_tower(mask_features)
         out["entity_cls_logits"] = cls_logits
 
         if self.aux_loss:

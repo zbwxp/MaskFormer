@@ -91,7 +91,11 @@ class MaskFormer(nn.Module):
         self.max_iter = max_iter
 
         if self.entity:
-            self.cls_head = nn.Linear(hidden_dim, num_classes)
+            self.cls_head = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.Linear(hidden_dim, num_classes),
+            )
             self.entity_criterion = entity_criterion
 
     @classmethod
@@ -243,8 +247,6 @@ class MaskFormer(nn.Module):
                 bs = len(masks)
                 ch = entity_cls_logits.size(1)
                 h, w = outputs["pred_masks"].size()[-2:]
-                entity_cls_logits = F.interpolate(entity_cls_logits, size=[h, w],
-                                                  mode="bilinear", align_corners=False)
                 masked_avg_pool = []
                 for b in range(bs):
                     n_inst = masks[b].size(0)
@@ -252,7 +254,7 @@ class MaskFormer(nn.Module):
                         print("got zero instance per img!!!!!!!!!!")
                         continue
                     per_im_masks = F.interpolate(masks[b].unsqueeze(0).float(), size=[h, w],
-                                                 mode="bilinear", align_corners=False)
+                                                 mode="nearest")
                     per_im_mask_weights = per_im_masks.reshape(n_inst, -1).sum(dim=-1)
                     masked_avg_pool.append(((entity_cls_logits[b].unsqueeze(1)
                                              * per_im_masks).reshape(ch, n_inst, -1)
@@ -379,8 +381,9 @@ class MaskFormer(nn.Module):
         h, w = mask_pred.size()[-2:]
         mask_pred = mask_pred.sigmoid()
         # upsample cls_logits
-        cls_logits = F.interpolate(cls_logits.unsqueeze(0), size=[h, w],
-                                   mode="bilinear", align_corners=False)
+        # cls_logits = F.interpolate(cls_logits.unsqueeze(0), size=[h, w],
+        #                            mode="bilinear", align_corners=False)
+        cls_logits = cls_logits.unsqueeze(0)
         # use all preds
         keep = entity_score[:, 0] > -4
         output = torch.zeros([self.sem_seg_head.num_classes, h, w], device=device)
@@ -398,7 +401,15 @@ class MaskFormer(nn.Module):
 
         # overlap the output by reverse sorted order
         # naive output!!!!!!!!
-        inst_ids = {0: 7, 1: 8, 2: 10, 3: 12, 4: 14, 5: 15, 6: 18, 7: 19, 8: 20, 9: 22, 10: 23, 11: 24, 12: 27, 13: 30, 14: 31, 15: 32, 16: 33, 17: 35, 18: 36, 19: 37, 20: 38, 21: 39, 22: 41, 23: 42, 24: 43, 25: 44, 26: 45, 27: 47, 28: 49, 29: 50, 30: 53, 31: 55, 32: 56, 33: 57, 34: 58, 35: 62, 36: 64, 37: 65, 38: 66, 39: 67, 40: 69, 41: 70, 42: 71, 43: 72, 44: 73, 45: 74, 46: 75, 47: 76, 48: 78, 49: 80, 50: 81, 51: 82, 52: 83, 53: 85, 54: 86, 55: 87, 56: 88, 57: 89, 58: 90, 59: 92, 60: 93, 61: 95, 62: 97, 63: 98, 64: 102, 65: 103, 66: 104, 67: 107, 68: 108, 69: 110, 70: 111, 71: 112, 72: 115, 73: 116, 74: 118, 75: 119, 76: 120, 77: 121, 78: 123, 79: 124, 80: 125, 81: 126, 82: 127, 83: 129, 84: 130, 85: 132, 86: 133, 87: 134, 88: 135, 89: 136, 90: 137, 91: 138, 92: 139, 93: 142, 94: 143, 95: 144, 96: 146, 97: 147, 98: 148, 99: 149}
+        inst_ids = {0: 7, 1: 8, 2: 10, 3: 12, 4: 14, 5: 15, 6: 18, 7: 19, 8: 20, 9: 22, 10: 23, 11: 24, 12: 27, 13: 30,
+                    14: 31, 15: 32, 16: 33, 17: 35, 18: 36, 19: 37, 20: 38, 21: 39, 22: 41, 23: 42, 24: 43, 25: 44,
+                    26: 45, 27: 47, 28: 49, 29: 50, 30: 53, 31: 55, 32: 56, 33: 57, 34: 58, 35: 62, 36: 64, 37: 65,
+                    38: 66, 39: 67, 40: 69, 41: 70, 42: 71, 43: 72, 44: 73, 45: 74, 46: 75, 47: 76, 48: 78, 49: 80,
+                    50: 81, 51: 82, 52: 83, 53: 85, 54: 86, 55: 87, 56: 88, 57: 89, 58: 90, 59: 92, 60: 93, 61: 95,
+                    62: 97, 63: 98, 64: 102, 65: 103, 66: 104, 67: 107, 68: 108, 69: 110, 70: 111, 71: 112, 72: 115,
+                    73: 116, 74: 118, 75: 119, 76: 120, 77: 121, 78: 123, 79: 124, 80: 125, 81: 126, 82: 127, 83: 129,
+                    84: 130, 85: 132, 86: 133, 87: 134, 88: 135, 89: 136, 90: 137, 91: 138, 92: 139, 93: 142, 94: 143,
+                    95: 144, 96: 146, 97: 147, 98: 148, 99: 149}
         # isthing = int(cat_id in inst_ids.values())
 
         score = (entity_score[:, 0][keep].sigmoid()) ** 2 * cls_pred_values.sigmoid()
