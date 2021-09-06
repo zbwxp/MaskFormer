@@ -91,14 +91,14 @@ class MaskFormer(nn.Module):
         self.register_buffer("_iter", torch.zeros([1]))
         self.max_iter = max_iter
 
-        self.is_pretrain_dataset = is_pretrain_dataset
-        if self.entity and not self.is_pretrain_dataset:
+        if self.entity:
             self.cls_head = nn.Sequential(
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.Linear(hidden_dim, num_classes),
             )
             self.entity_criterion = entity_criterion
+        self.is_pretrain_dataset = is_pretrain_dataset
 
     @classmethod
     def from_config(cls, cfg):
@@ -158,7 +158,7 @@ class MaskFormer(nn.Module):
             losses=losses,
         )
         entity_criterion = None
-        if entity and not cfg.MODEL.MASK_FORMER.IS_PRETRAIN_DATASET:
+        if entity:
             entity_criterion = SetCriterion(
                 sem_seg_head.num_classes,
                 matcher=matcher,
@@ -243,7 +243,7 @@ class MaskFormer(nn.Module):
             # bipartite matching-based loss
             losses = self.criterion(outputs, targets)
 
-            if self.entity and not self.is_pretrain_dataset:
+            if self.entity:
                 entity_cls_logits = outputs["entity_cls_logits"]
                 labels = [t["labels"] for t in targets]
                 masks = [t["masks"] for t in targets]
@@ -270,6 +270,8 @@ class MaskFormer(nn.Module):
                     cls_preds = self.cls_head(masked_avg_pool)
 
                     loss_entity_cls = F.cross_entropy(cls_preds, labels)
+                    if self.is_pretrain_dataset:
+                        loss_entity_cls *= 0
                     losses.update({"loss_entity_cls": loss_entity_cls})
 
             for k in list(losses.keys()):
