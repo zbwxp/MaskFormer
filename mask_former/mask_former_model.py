@@ -91,14 +91,14 @@ class MaskFormer(nn.Module):
         self.register_buffer("_iter", torch.zeros([1]))
         self.max_iter = max_iter
 
-        if self.entity:
+        self.is_pretrain_dataset = is_pretrain_dataset
+        if self.entity and not self.is_pretrain_dataset:
             self.cls_head = nn.Sequential(
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.Linear(hidden_dim, num_classes),
             )
             self.entity_criterion = entity_criterion
-        self.is_pretrain_dataset = is_pretrain_dataset
 
     @classmethod
     def from_config(cls, cfg):
@@ -158,7 +158,7 @@ class MaskFormer(nn.Module):
             losses=losses,
         )
         entity_criterion = None
-        if entity:
+        if entity and not cfg.MODEL.MASK_FORMER.IS_PRETRAIN_DATASET:
             entity_criterion = SetCriterion(
                 sem_seg_head.num_classes,
                 matcher=matcher,
