@@ -47,6 +47,7 @@ class MaskFormer(nn.Module):
             num_classes: int,
             hidden_dim: int,
             entity_criterion: nn.Module,
+            is_pretrain_dataset: bool,
     ):
         """
         Args:
@@ -97,6 +98,7 @@ class MaskFormer(nn.Module):
                 nn.Linear(hidden_dim, num_classes),
             )
             self.entity_criterion = entity_criterion
+        self.is_pretrain_dataset = is_pretrain_dataset
 
     @classmethod
     def from_config(cls, cfg):
@@ -186,7 +188,8 @@ class MaskFormer(nn.Module):
             "entity": cfg.MODEL.MASK_FORMER.ENTITY,
             "num_classes": cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES,
             "hidden_dim": cfg.MODEL.MASK_FORMER.HIDDEN_DIM,
-            "entity_criterion": entity_criterion
+            "entity_criterion": entity_criterion,
+            "is_pretrain_dataset": cfg.MODEL.MASK_FORMER.IS_PRETRAIN_DATASET,
         }
 
     @property
@@ -240,7 +243,7 @@ class MaskFormer(nn.Module):
             # bipartite matching-based loss
             losses = self.criterion(outputs, targets)
 
-            if self.entity:
+            if self.entity and not self.is_pretrain_dataset:
                 entity_cls_logits = outputs["entity_cls_logits"]
                 labels = [t["labels"] for t in targets]
                 masks = [t["masks"] for t in targets]

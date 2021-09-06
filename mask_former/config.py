@@ -38,6 +38,7 @@ def add_mask_former_config(cfg):
     cfg.MODEL.MASK_FORMER.ENTITY = False
     cfg.MODEL.MASK_FORMER.ENTITY_WEIGHT = None
     cfg.MODEL.MASK_FORMER.ENTITY_CLS_TOWER_NORM = 'GN'
+    cfg.MODEL.MASK_FORMER.IS_PRETRAIN_DATASET = False
 
     # transformer config
     cfg.MODEL.MASK_FORMER.NHEADS = 8
