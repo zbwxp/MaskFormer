@@ -10,6 +10,7 @@ from torch import nn
 from detectron2.utils.comm import get_world_size
 
 from ..utils.misc import is_dist_avail_and_initialized, nested_tensor_from_tensor_list
+import matplotlib.pyplot as plt
 
 
 def dice_loss(inputs, targets, num_masks):
@@ -23,6 +24,22 @@ def dice_loss(inputs, targets, num_masks):
                 (0 for the negative class and 1 for the positive class).
     """
     inputs = inputs.sigmoid()
+    inputs = inputs.flatten(1)
+    numerator = 2 * (inputs * targets).sum(-1)
+    denominator = inputs.sum(-1) + targets.sum(-1)
+    loss = 1 - (numerator + 1) / (denominator + 1)
+    return loss.sum() / num_masks
+
+def dice_loss_softmax(inputs, targets, num_masks):
+    """
+    Compute the DICE loss, similar to generalized IOU for masks
+    Args:
+        inputs: A float tensor of arbitrary shape.
+                The predictions for each example.
+        targets: A float tensor with the same shape as inputs. Stores the binary
+                 classification label for each element in inputs
+                (0 for the negative class and 1 for the positive class).
+    """
     inputs = inputs.flatten(1)
     numerator = 2 * (inputs * targets).sum(-1)
     denominator = inputs.sum(-1) + targets.sum(-1)
@@ -168,6 +185,47 @@ class SetCriterion(nn.Module):
         }
         return losses
 
+    def loss_softmax(self, outputs, targets, indices, num_masks):
+        assert "pred_masks" in outputs
+
+        src_idx = self._get_src_permutation_idx(indices)
+        tgt_idx = self._get_tgt_permutation_idx(indices)
+        src_masks = outputs["pred_masks"]
+        # src_masks = src_masks[src_idx]
+        masks = [t["masks"] for t in targets]
+        # TODO use valid to mask invalid areas due to padding in loss
+        target_masks, valid = nested_tensor_from_tensor_list(masks).decompose()
+        target_masks = target_masks.to(src_masks)
+        src_masks_imgs = []
+        tgt_masks_imgs = []
+        # process per img in a batch
+        for img_ind in tgt_idx[0].unique():
+            per_img_src_idx = torch.stack(src_idx)[:, src_idx[0] == img_ind]
+            src_masks_per_img = src_masks[per_img_src_idx[0, :], per_img_src_idx[1:]]
+            src_masks_per_img = F.softmax(src_masks_per_img.squeeze(0), dim=0).unsqueeze(0)
+
+            per_img_tgt_idx = torch.stack(tgt_idx)[:, tgt_idx[0] == img_ind]
+            tgt_masks_per_img = target_masks[per_img_tgt_idx[0, :], per_img_tgt_idx[1:]]
+
+            src_masks_imgs.append(src_masks_per_img)
+            tgt_masks_imgs.append(tgt_masks_per_img)
+
+        src_masks = torch.cat(src_masks_imgs, dim=1)
+        target_masks = torch.cat(tgt_masks_imgs, dim=1)
+
+        # upsample predictions to the target size
+        src_masks = F.interpolate(
+            src_masks, size=target_masks.shape[-2:], mode="bilinear", align_corners=False
+        )
+        src_masks = src_masks[0].flatten(1)
+
+        target_masks = target_masks[0].flatten(1)
+        target_masks = target_masks.view(src_masks.shape)
+        losses = {
+            "loss_dice_softmax": dice_loss_softmax(src_masks, target_masks, num_masks),
+        }
+        return losses
+
     def loss_coords(self, outputs, targets, indices, num_masks):
         assert "pred_coords" in outputs
         src_idx = self._get_src_permutation_idx(indices)
@@ -200,7 +258,8 @@ class SetCriterion(nn.Module):
                     "masks": self.loss_masks,
                     "coords": self.loss_coords,
                     "entity": self.loss_entity,
-                    "entity_cls": self.loss_entity_cls}
+                    "entity_cls": self.loss_entity_cls,
+                    "softmax_loss": self.loss_softmax}
         assert loss in loss_map, f"do you really want to compute {loss} loss?"
         return loss_map[loss](outputs, targets, indices, num_masks)
 

@@ -46,7 +46,7 @@ class MaskFormer(nn.Module):
             entity: bool,
             num_classes: int,
             hidden_dim: int,
-            entity_criterion: nn.Module,
+            entity_weight: float,
             is_pretrain_dataset: bool,
     ):
         """
@@ -97,7 +97,7 @@ class MaskFormer(nn.Module):
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.Linear(hidden_dim, num_classes),
             )
-            self.entity_criterion = entity_criterion
+            self.entity_weight = {"loss_entity_cls": entity_weight}
         self.is_pretrain_dataset = is_pretrain_dataset
 
     @classmethod
@@ -114,6 +114,8 @@ class MaskFormer(nn.Module):
         matcher_name = cfg.MODEL.MASK_FORMER.MATCHER
         entity_weight = cfg.MODEL.MASK_FORMER.ENTITY_WEIGHT
         entity = cfg.MODEL.MASK_FORMER.ENTITY
+        use_softmax_loss = cfg.MODEL.MASK_FORMER.SOFTMAX_LOSS
+        softmax_weight = cfg.MODEL.MASK_FORMER.SOFTMAX_WEIGHT
 
         # building criterion
         if matcher_name == "HungarianMatcher":
@@ -136,6 +138,8 @@ class MaskFormer(nn.Module):
             weight_dict.update({"loss_coord": coord_weight})
         if entity_weight is not None:
             weight_dict.update({"loss_ce_entity": entity_weight})
+        if softmax_weight is not None:
+            weight_dict.update({"loss_dice_softmax": softmax_weight})
         if deep_supervision:
             dec_layers = cfg.MODEL.MASK_FORMER.DEC_LAYERS
             aux_weight_dict = {}
@@ -149,6 +153,8 @@ class MaskFormer(nn.Module):
         if matcher_name == "EntityHungarianMatcher":
             losses.remove("labels")
             losses.append("entity")
+        if use_softmax_loss:
+            losses.append("softmax_loss")
 
         criterion = SetCriterion(
             sem_seg_head.num_classes,
@@ -157,15 +163,6 @@ class MaskFormer(nn.Module):
             eos_coef=no_object_weight,
             losses=losses,
         )
-        entity_criterion = None
-        if entity:
-            entity_criterion = SetCriterion(
-                sem_seg_head.num_classes,
-                matcher=matcher,
-                weight_dict={"loss_entity_cls": 1},
-                eos_coef=no_object_weight,
-                losses=["entity_cls"],
-            )
 
         return {
             "backbone": backbone,
@@ -188,7 +185,7 @@ class MaskFormer(nn.Module):
             "entity": cfg.MODEL.MASK_FORMER.ENTITY,
             "num_classes": cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES,
             "hidden_dim": cfg.MODEL.MASK_FORMER.HIDDEN_DIM,
-            "entity_criterion": entity_criterion,
+            "entity_weight": entity_weight,
             "is_pretrain_dataset": cfg.MODEL.MASK_FORMER.IS_PRETRAIN_DATASET,
         }
 
@@ -281,8 +278,8 @@ class MaskFormer(nn.Module):
                     if "loss_coord" in k:
                         losses[k] *= max(((self.max_iter - self._iter.item()) / self.max_iter) ** 2, 0)
                         # print("loss_coord decay:", max((self.max_iter - self._iter.item()) / self.max_iter, 0))
-                elif k in self.entity_criterion.weight_dict:
-                    losses[k] *= self.entity_criterion.weight_dict[k]
+                elif k in self.entity_weight:
+                    losses[k] *= self.entity_weight[k]
                 else:
                     # remove this loss if not specified in `weight_dict`
                     losses.pop(k)
