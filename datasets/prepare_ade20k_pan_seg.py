@@ -10,6 +10,7 @@ import numpy as np
 import tqdm
 from panopticapi.utils import IdGenerator, save_json
 from PIL import Image
+import matplotlib.pyplot as plt
 
 ADE20K_SEM_SEG_CATEGORIES = [
     "wall",
@@ -163,7 +164,7 @@ ADE20K_SEM_SEG_CATEGORIES = [
     "clock",
     "flag",  # noqa
 ]
-
+#!!!!!!![140, 140, 140] is not unique!!!!
 PALETTE = [
     [120, 120, 120],
     [180, 120, 120],
@@ -171,7 +172,7 @@ PALETTE = [
     [80, 50, 50],
     [4, 200, 3],
     [120, 120, 80],
-    [140, 140, 140],
+    [140, 140, 24],
     [204, 5, 255],
     [230, 230, 230],
     [4, 250, 7],
@@ -317,7 +318,6 @@ PALETTE = [
     [92, 0, 255],
 ]
 
-
 if __name__ == "__main__":
     dataset_dir = os.getenv("DETECTRON2_DATASETS", "datasets")
 
@@ -338,12 +338,12 @@ if __name__ == "__main__":
             os.mkdir(out_folder)
 
         # json config
-        config_file = "datasets/ade20k_instance_imgCatIds.json"
+        config_file = os.path.join(dataset_dir, f"ADEChallengeData2016/ade20k_instance_imgCatIds.json")
         with open(config_file) as f:
             config = json.load(f)
 
         # load catid mapping
-        mapping_file = "datasets/ade20k_instance_catid_mapping.txt"
+        mapping_file = os.path.join(dataset_dir, f"ADEChallengeData2016/ade20k_instance_catid_mapping.txt")
         with open(mapping_file) as f:
             map_id = {}
             for i, line in enumerate(f.readlines()):
@@ -387,6 +387,9 @@ if __name__ == "__main__":
             pan_seg = np.zeros(
                 (original_format.shape[0], original_format.shape[1], 3), dtype=np.uint8
             )
+            id_pan_seg = np.zeros(
+                (original_format.shape[0], original_format.shape[1]), dtype=np.float
+            )
             id_generator = IdGenerator(categories_dict)
 
             filename_semantic = os.path.join(semantic_dir, image_id + ".png")
@@ -421,6 +424,7 @@ if __name__ == "__main__":
 
                 segment_id, color = id_generator.get_id_and_color(semantic_cat_id)
                 pan_seg[mask] = color
+                id_pan_seg[mask] = segment_id
 
                 area = np.sum(mask)  # segment area computation
                 # bbox computation for a segment
@@ -444,6 +448,7 @@ if __name__ == "__main__":
                     }
                 )
 
+            segm_info_seg_length = len(np.unique(id_pan_seg))
             # process things
             for thing_id in np.unique(instance_ins_ids):
                 if thing_id == 0:
@@ -456,6 +461,7 @@ if __name__ == "__main__":
 
                 segment_id, color = id_generator.get_id_and_color(semantic_cat_id)
                 pan_seg[mask] = color
+                id_pan_seg[mask] = segment_id
 
                 area = np.sum(mask)  # segment area computation
                 # bbox computation for a segment
@@ -478,6 +484,22 @@ if __name__ == "__main__":
                         "iscrowd": 0,
                     }
                 )
+
+            if len(segm_info) != len(np.unique(instance_ins_ids)) + segm_info_seg_length - 2:
+                print("some anno is completely overlapoped!!")
+            if len(segm_info)+1 != len(np.unique(id_pan_seg)):
+                print("some anno is missing!!")
+
+            # check overlap
+            segm_info_ids = [iter['id'] for iter in segm_info]
+            for id in np.unique(id_pan_seg):
+                new_area = (id_pan_seg == id).sum()
+                # print("new_area:", new_area)
+                if int(id) in segm_info_ids:
+                    old_area = segm_info[segm_info_ids.index(int(id))]['area']
+                    if new_area != old_area:
+                        print("overlap happens!!!!! differnet is ", 100*(1-new_area/old_area), "%")
+                        segm_info[segm_info_ids.index(int(id))]['area'] = int(new_area)
 
             panoptic_json_annotation = {
                 "image_id": image_id,

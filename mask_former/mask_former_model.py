@@ -397,27 +397,11 @@ class MaskFormer(nn.Module):
         cls_pred_values, cls_pred_indices = self.cls_head(masked_avg_pool).max(dim=-1)
 
         # overlap the output by reverse sorted order
-        # naive output!!!!!!!!
-        inst_ids = {0: 7, 1: 8, 2: 10, 3: 12, 4: 14, 5: 15, 6: 18, 7: 19, 8: 20, 9: 22, 10: 23, 11: 24, 12: 27, 13: 30, 14: 31, 15: 32, 16: 33, 17: 35, 18: 36, 19: 37, 20: 38, 21: 39, 22: 41, 23: 42, 24: 43, 25: 44, 26: 45, 27: 47, 28: 49, 29: 50, 30: 53, 31: 55, 32: 56, 33: 57, 34: 58, 35: 62, 36: 64, 37: 65, 38: 66, 39: 67, 40: 69, 41: 70, 42: 71, 43: 72, 44: 73, 45: 74, 46: 75, 47: 76, 48: 78, 49: 80, 50: 81, 51: 82, 52: 83, 53: 85, 54: 86, 55: 87, 56: 88, 57: 89, 58: 90, 59: 92, 60: 93, 61: 95, 62: 97, 63: 98, 64: 102, 65: 103, 66: 104, 67: 107, 68: 108, 69: 110, 70: 111, 71: 112, 72: 115, 73: 116, 74: 118, 75: 119, 76: 120, 77: 121, 78: 123, 79: 124, 80: 125, 81: 126, 82: 127, 83: 129, 84: 130, 85: 132, 86: 133, 87: 134, 88: 135, 89: 136, 90: 137, 91: 138, 92: 139, 93: 142, 94: 143, 95: 144, 96: 146, 97: 147, 98: 148, 99: 149}
-        # isthing = int(cat_id in inst_ids.values())
-
-        score = (entity_score[:, 0][keep].sigmoid()) ** 2 * cls_pred_values.sigmoid()
+        score = (entity_score[:, 0][keep].sigmoid()) * cls_pred_values.sigmoid()
         sorted, indices = score.sort(0)
         # add sem_seg first
         for indice in indices:
-            cat_id = cls_pred_indices[indice]
-            isthing = int(cat_id in inst_ids.values())
-            if isthing:
-                continue
-            output[cls_pred_indices[indice]] = keep_pred[indice]
-
-        for indice in indices:
-            cat_id = cls_pred_indices[indice]
-            isthing = int(cat_id in inst_ids.values())
-            if not isthing:
-                continue
-            output[cls_pred_indices[indice]] = keep_pred[indice]
-
+            output[cls_pred_indices[indice]] += keep_pred[indice]
         return output
 
     def semantic_inference(self, mask_cls, mask_pred):
