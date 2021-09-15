@@ -350,6 +350,9 @@ class DeformableTransformerEncoderPixelDecoder(BasePixelDecoder):
         self.lateral_convs = self.lateral_convs[:-1]
         self.lateral_convs.append(res5_lateral_conv)
         self.lateral_convs.append(res6_lateral_conv)
+        self.in_features.append("res6")
+        self.lateral_convs = {feat: conv for conv, feat in zip(self.lateral_convs, self.in_features)}
+
         N_steps = conv_dim // 2
         self.pe_layer = PositionEmbeddingSine(N_steps, normalize=True)
         num_queries = transformer_num_queries
@@ -368,10 +371,10 @@ class DeformableTransformerEncoderPixelDecoder(BasePixelDecoder):
             activation=F.relu,
         )
         weight_init.c2_xavier_fill(output_conv)
-        delattr(self, "layer_{}".format(1))
-        delattr(self, "layer_{}".format(2))
-        delattr(self, "layer_{}".format(3))
-        delattr(self, "layer_{}".format(4))
+        for name in dir(self):
+            if "layer_" in name:
+                delattr(self, name)
+
         self.add_module("layer_{}".format(1), output_conv)
         self.output_convs = [output_conv]
 
@@ -425,21 +428,23 @@ class DeformableTransformerEncoderPixelDecoder(BasePixelDecoder):
         srcs = []
         pos = []
         mask = []
-        for l, feat in (enumerate(features)):
-            lateral_conv = self.lateral_convs[l]
+        for feat in features:
+            if feat not in self.in_features:
+                continue
+            lateral_conv = self.lateral_convs[feat]
             x = lateral_conv(features[feat])
             pos.append(self.pe_layer(x))
             mask.append(torch.zeros((x.size(0), x.size(2), x.size(3)),
                                     device=x.device, dtype=torch.bool))
             srcs.append(x)
 
-        srcs.append(self.lateral_convs[-1](features["res5"]))
+        srcs.append(self.lateral_convs["res6"](features["res5"]))
         pos.append(self.pe_layer(srcs[-1]))
         mask.append(torch.zeros((srcs[-1].size(0), srcs[-1].size(2), srcs[-1].size(3)),
                                 device=srcs[-1].device, dtype=torch.bool))
         query_embeds = self.query_embed.weight
         encoder_results = \
-            self.deformable_transformer_encoder(srcs[1:], mask[1:], pos[1:], query_embeds)
+            self.deformable_transformer_encoder(srcs, mask, pos, query_embeds)
 
         memory = encoder_results["memory"]
         encoded_maps = self.flat2feature(memory, encoder_results["spatial_shapes"],
@@ -452,7 +457,7 @@ class DeformableTransformerEncoderPixelDecoder(BasePixelDecoder):
             maps.append(F.interpolate(map, size=srcs[1].size()[-2:], mode="nearest"))
         maps = torch.cat(maps, dim=1)
         y = self.output_convs[0](maps)
-        y = F.interpolate(y, size=srcs[0].size()[-2:], mode="bilinear", align_corners=False)
+        y = F.interpolate(y, size=features["res2"].size()[-2:], mode="bilinear", align_corners=False)
 
         return y, encoder_results
         # return self.mask_features(y), encoder_results
