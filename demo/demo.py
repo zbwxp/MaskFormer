@@ -108,7 +108,9 @@ if __name__ == "__main__":
     demo = VisualizationDemo(cfg)
 
     if args.input:
-        if len(args.input) == 1:
+        if os.path.isdir(args.input[0]):
+            args.input = [os.path.join(args.input[0], fname) for fname in os.listdir(args.input[0])]
+        elif len(args.input) == 1:
             args.input = glob.glob(os.path.expanduser(args.input[0]))
             assert args.input, "The input path(s) was not found"
         for path in tqdm.tqdm(args.input, disable=not args.output):
