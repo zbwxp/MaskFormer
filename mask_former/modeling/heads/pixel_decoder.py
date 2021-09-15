@@ -15,6 +15,7 @@ from ..transformer.position_encoding import PositionEmbeddingSine
 from ..transformer.transformer import TransformerEncoder, TransformerEncoderLayer
 from .deformable_transformer import *
 
+
 def build_pixel_decoder(cfg, input_shape):
     """
     Build a pixel decoder from `cfg.MODEL.MASK_FORMER.PIXEL_DECODER_NAME`.
@@ -357,7 +358,7 @@ class DeformableTransformerEncoderPixelDecoder(BasePixelDecoder):
         use_bias = norm == ""
         output_norm = get_norm(norm, conv_dim)
         output_conv = Conv2d(
-            conv_dim,
+            conv_dim * 4,
             conv_dim,
             kernel_size=3,
             stride=1,
@@ -367,9 +368,12 @@ class DeformableTransformerEncoderPixelDecoder(BasePixelDecoder):
             activation=F.relu,
         )
         weight_init.c2_xavier_fill(output_conv)
-        delattr(self, "layer_{}".format(len(self.in_features)))
-        self.add_module("layer_{}".format(len(self.in_features)), output_conv)
-        self.output_convs[0] = output_conv
+        delattr(self, "layer_{}".format(1))
+        delattr(self, "layer_{}".format(2))
+        delattr(self, "layer_{}".format(3))
+        delattr(self, "layer_{}".format(4))
+        self.add_module("layer_{}".format(1), output_conv)
+        self.output_convs = [output_conv]
 
         d_model = 256
         dim_feedforward = transformer_dim_feedforward
@@ -420,32 +424,47 @@ class DeformableTransformerEncoderPixelDecoder(BasePixelDecoder):
         srcs = []
         pos = []
         mask = []
-        for l, feat in reversed(list(enumerate(features))):
+        for l, feat in (enumerate(features)):
             lateral_conv = self.lateral_convs[l]
-            output_conv = self.output_convs[l]
             x = lateral_conv(features[feat])
-            if feat == "res5":
-                y = output_conv(x)
-            else:
-                y = x + F.interpolate(y, size=x.shape[-2:], mode="nearest")
-                y = output_conv(y)
             pos.append(self.pe_layer(x))
             mask.append(torch.zeros((x.size(0), x.size(2), x.size(3)),
                                     device=x.device, dtype=torch.bool))
             srcs.append(x)
-        srcs.reverse()
-        pos.reverse()
-        mask.reverse()
+
         srcs.append(self.lateral_convs[-1](features["res5"]))
         pos.append(self.pe_layer(srcs[-1]))
         mask.append(torch.zeros((srcs[-1].size(0), srcs[-1].size(2), srcs[-1].size(3)),
                                 device=srcs[-1].device, dtype=torch.bool))
         query_embeds = self.query_embed.weight
-        transformer_encode_results = \
+        encoder_results = \
             self.deformable_transformer_encoder(srcs[1:], mask[1:], pos[1:], query_embeds)
 
-        return self.mask_features(y), transformer_encode_results
+        memory = encoder_results["memory"]
+        encoded_maps = self.flat2feature(memory, encoder_results["spatial_shapes"],
+                                         encoder_results["level_start_index"])
 
+        # asamble all feature maps together
+        encoded_maps.reverse()
+        maps = []
+        for map in encoded_maps:
+            maps.append(F.interpolate(map, size=srcs[1].size()[-2:], mode="nearest"))
+        maps = torch.cat(maps, dim=1)
+        y = self.output_convs[0](maps)
+        y = srcs[0] + F.interpolate(y, size=srcs[0].size()[-2:], mode="nearest")
+
+        return self.mask_features(y), encoder_results
+
+    def flat2feature(self, t, spatial_shapes, level_start_index):
+        b, num, ch = t.size()
+        feature_maps = []
+        for idx, shape in zip(level_start_index, spatial_shapes):
+            range = shape[0] * shape[1]
+            feature_map = t[:, idx:idx + range, :].reshape(b, shape[0], shape[1], ch)
+            feature_map = feature_map.permute(0, -1, 1, 2)
+            feature_maps.append(feature_map)
+
+        return feature_maps
 
     def forward(self, features, targets=None):
         logger = logging.getLogger(__name__)
@@ -498,4 +517,3 @@ class DeformableTransformerEncoderPixelDecoder(BasePixelDecoder):
             "query_embed": query_embed,
             "mask_flatten": mask_flatten,
         }
-
