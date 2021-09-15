@@ -389,6 +389,7 @@ class DeformableTransformerEncoderPixelDecoder(BasePixelDecoder):
         self.encoder = DeformableTransformerEncoder(encoder_layer, num_encoder_layers)
         self.level_embed = nn.Parameter(torch.Tensor(num_feature_levels, d_model))
         self.reference_points = nn.Linear(d_model, 2)
+        self.mask_features = None
 
         self._reset_parameters()
 
@@ -451,9 +452,10 @@ class DeformableTransformerEncoderPixelDecoder(BasePixelDecoder):
             maps.append(F.interpolate(map, size=srcs[1].size()[-2:], mode="nearest"))
         maps = torch.cat(maps, dim=1)
         y = self.output_convs[0](maps)
-        y = srcs[0] + F.interpolate(y, size=srcs[0].size()[-2:], mode="nearest")
+        y = F.interpolate(y, size=srcs[0].size()[-2:], mode="bilinear", align_corners=False)
 
-        return self.mask_features(y), encoder_results
+        return y, encoder_results
+        # return self.mask_features(y), encoder_results
 
     def flat2feature(self, t, spatial_shapes, level_start_index):
         b, num, ch = t.size()
