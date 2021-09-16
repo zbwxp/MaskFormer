@@ -620,7 +620,7 @@ class DeformableTransformerEncoderPixelDecoder(BasePixelDecoder):
         num_encoder_layers = transformer_enc_layers
         self.encoder = DeformableTransformerEncoder(encoder_layer, num_encoder_layers)
         self.level_embed = nn.Parameter(torch.Tensor(num_feature_levels, d_model))
-        self.reference_points = nn.Linear(d_model, 2)
+        # self.reference_points = nn.Linear(d_model, 2)
         self.mask_features = None
 
         self._reset_parameters()
@@ -634,8 +634,8 @@ class DeformableTransformerEncoderPixelDecoder(BasePixelDecoder):
             if isinstance(m, MSDeformAttn):
                 m._reset_parameters()
 
-        xavier_uniform_(self.reference_points.weight.data, gain=1.0)
-        constant_(self.reference_points.bias.data, 0.)
+        # xavier_uniform_(self.reference_points.weight.data, gain=1.0)
+        # constant_(self.reference_points.bias.data, 0.)
         normal_(self.level_embed)
 
     @classmethod
