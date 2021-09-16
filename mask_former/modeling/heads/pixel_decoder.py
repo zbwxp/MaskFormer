@@ -617,7 +617,7 @@ class DeformableTransformerEncoderPixelDecoder(BasePixelDecoder):
         encoder_layer = DeformableTransformerEncoderLayer(d_model, dim_feedforward,
                                                           dropout, activation,
                                                           num_feature_levels, nhead, enc_n_points)
-        num_encoder_layers = transformer_enc_layers
+        num_encoder_layers = 6
         self.encoder = DeformableTransformerEncoder(encoder_layer, num_encoder_layers)
         self.level_embed = nn.Parameter(torch.Tensor(num_feature_levels, d_model))
         # self.reference_points = nn.Linear(d_model, 2)
