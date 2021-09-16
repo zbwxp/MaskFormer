@@ -11,7 +11,10 @@ from detectron2.config import configurable
 from detectron2.layers import Conv2d, ShapeSpec, get_norm
 from detectron2.modeling import SEM_SEG_HEADS_REGISTRY
 
-from ..transformer.deformable_transformer_predictor import DeformableTransformerPredictor
+# from ..transformer.deformable_transformer_predictor import DeformableTransformerPredictor
+from ..transformer.multi_level_transformer_predictor import MultiLevelTransformerPredictor
+from ..transformer.transformer_predictor import TransformerPredictor
+
 from .pixel_decoder import build_pixel_decoder
 
 
@@ -86,6 +89,22 @@ class DeformableHead(nn.Module):
 
     @classmethod
     def from_config(cls, cfg, input_shape: Dict[str, ShapeSpec]):
+        if cfg.MODEL.MASK_FORMER.TRANSFORMER_IN_FEATURE == "res5":
+            transformer_predictor = TransformerPredictor(
+                cfg,
+                cfg.MODEL.SEM_SEG_HEAD.CONVS_DIM
+                if cfg.MODEL.MASK_FORMER.TRANSFORMER_IN_FEATURE == "transformer_encoder"
+                else input_shape[cfg.MODEL.MASK_FORMER.TRANSFORMER_IN_FEATURE].channels,
+                mask_classification=True,
+            )
+        else:
+            transformer_predictor = MultiLevelTransformerPredictor(
+                cfg,
+                cfg.MODEL.SEM_SEG_HEAD.CONVS_DIM
+                if cfg.MODEL.MASK_FORMER.TRANSFORMER_IN_FEATURE == "transformer_encoder"
+                else input_shape[cfg.MODEL.MASK_FORMER.TRANSFORMER_IN_FEATURE].channels,
+                mask_classification=True,
+            )
         return {
             "input_shape": {
                 k: v for k, v in input_shape.items() if k in cfg.MODEL.SEM_SEG_HEAD.IN_FEATURES
@@ -95,13 +114,7 @@ class DeformableHead(nn.Module):
             "pixel_decoder": build_pixel_decoder(cfg, input_shape),
             "loss_weight": cfg.MODEL.SEM_SEG_HEAD.LOSS_WEIGHT,
             "transformer_in_feature": cfg.MODEL.MASK_FORMER.TRANSFORMER_IN_FEATURE,
-            "transformer_predictor": DeformableTransformerPredictor(
-                cfg,
-                cfg.MODEL.SEM_SEG_HEAD.CONVS_DIM
-                if cfg.MODEL.MASK_FORMER.TRANSFORMER_IN_FEATURE == "transformer_encoder"
-                else input_shape[cfg.MODEL.MASK_FORMER.TRANSFORMER_IN_FEATURE].channels,
-                mask_classification=True,
-            ),
+            "transformer_predictor": transformer_predictor,
         }
 
     def forward(self, features):
