@@ -30,6 +30,7 @@ class DeformableTransformerPredictor(nn.Module):
         deep_supervision: bool,
         mask_dim: int,
         enforce_input_project: bool,
+        entity: bool,
     ):
         """
         NOTE: this interface is experimental.
@@ -51,6 +52,7 @@ class DeformableTransformerPredictor(nn.Module):
                 channels and hidden dim is identical
         """
         super().__init__()
+        self.entity = entity
         d_model = 256
         activation = "relu"
         num_feature_levels = 4
@@ -74,6 +76,8 @@ class DeformableTransformerPredictor(nn.Module):
         # output FFNs
         if self.mask_classification:
             self.class_embed = nn.Linear(hidden_dim, num_classes + 1)
+            if self.entity:
+                self.class_embed = nn.Linear(hidden_dim, 1)
         self.mask_embed = MLP(hidden_dim, hidden_dim, mask_dim, 3)
 
         self._reset_parameters()
@@ -107,6 +111,7 @@ class DeformableTransformerPredictor(nn.Module):
         ret["enforce_input_project"] = cfg.MODEL.MASK_FORMER.ENFORCE_INPUT_PROJ
 
         ret["mask_dim"] = cfg.MODEL.SEM_SEG_HEAD.MASK_DIM
+        ret["entity"] = cfg.MODEL.MASK_FORMER.ENTITY
 
         return ret
 
