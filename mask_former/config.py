@@ -49,6 +49,8 @@ def add_mask_former_config(cfg):
     cfg.MODEL.MASK_FORMER.ENFORCE_INPUT_PROJ = False
     cfg.MODEL.MASK_FORMER.DEFORMABLE_PREDICTOR = False
     cfg.MODEL.MASK_FORMER.ENTITY = False
+    cfg.MODEL.MASK_FORMER.ENTITY_WEIGHT = None
+    cfg.MODEL.MASK_FORMER.MATCHER = "HungarianMatcher"
 
     # mask_former inference config
     cfg.MODEL.MASK_FORMER.TEST = CN()

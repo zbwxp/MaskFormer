@@ -65,7 +65,7 @@ class SetCriterion(nn.Module):
         2) we supervise each pair of matched ground-truth / prediction (supervise class and box)
     """
 
-    def __init__(self, num_classes, matcher, weight_dict, eos_coef, losses):
+    def __init__(self, num_classes, matcher, weight_dict, eos_coef, losses, entity=False):
         """Create the criterion.
         Parameters:
             num_classes: number of object categories, omitting the special no-object category
@@ -83,6 +83,7 @@ class SetCriterion(nn.Module):
         empty_weight = torch.ones(self.num_classes + 1)
         empty_weight[-1] = self.eos_coef
         self.register_buffer("empty_weight", empty_weight)
+        self.entity = entity
 
     def loss_labels(self, outputs, targets, indices, num_masks):
         """Classification loss (NLL)
@@ -97,7 +98,14 @@ class SetCriterion(nn.Module):
             src_logits.shape[:2], self.num_classes, dtype=torch.int64, device=src_logits.device
         )
         target_classes[idx] = target_classes_o
+        if self.entity:
+            target_classes = target_classes.float()
+            target_classes_o = target_classes_o * 0 + 1.0
+            target_classes[idx] = target_classes_o
+            loss_ce_entity = F.binary_cross_entropy_with_logits(src_logits, target_classes.unsqueeze(-1))
+            losses = {"loss_ce_entity": loss_ce_entity}
 
+            return losses
         loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight)
         losses = {"loss_ce": loss_ce}
         return losses

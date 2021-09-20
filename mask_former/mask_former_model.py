@@ -14,6 +14,10 @@ from detectron2.structures import ImageList
 
 from .modeling.criterion import SetCriterion
 from .modeling.matcher import HungarianMatcher
+from .modeling.test_matcher import HungarianMatcher_maskonly
+from .modeling.entity_matcher import HungarianMatcher_entity
+from detectron2.structures import Instances, Boxes
+import matplotlib.pyplot as plt
 
 
 @META_ARCH_REGISTRY.register()
@@ -24,20 +28,22 @@ class MaskFormer(nn.Module):
 
     @configurable
     def __init__(
-        self,
-        *,
-        backbone: Backbone,
-        sem_seg_head: nn.Module,
-        criterion: nn.Module,
-        num_queries: int,
-        panoptic_on: bool,
-        object_mask_threshold: float,
-        overlap_threshold: float,
-        metadata,
-        size_divisibility: int,
-        sem_seg_postprocess_before_inference: bool,
-        pixel_mean: Tuple[float],
-        pixel_std: Tuple[float],
+            self,
+            *,
+            backbone: Backbone,
+            sem_seg_head: nn.Module,
+            criterion: nn.Module,
+            num_queries: int,
+            panoptic_on: bool,
+            object_mask_threshold: float,
+            overlap_threshold: float,
+            metadata,
+            size_divisibility: int,
+            sem_seg_postprocess_before_inference: bool,
+            pixel_mean: Tuple[float],
+            pixel_std: Tuple[float],
+            entity_test: bool,
+            entity: bool,
     ):
         """
         Args:
@@ -76,6 +82,14 @@ class MaskFormer(nn.Module):
         self.sem_seg_postprocess_before_inference = sem_seg_postprocess_before_inference
         self.register_buffer("pixel_mean", torch.Tensor(pixel_mean).view(-1, 1, 1), False)
         self.register_buffer("pixel_std", torch.Tensor(pixel_std).view(-1, 1, 1), False)
+        self.entity_test_on = entity_test
+        self.entity = entity
+        if self.entity_test_on:
+            self.matcher = HungarianMatcher_maskonly(
+                cost_class=1,
+                cost_mask=20.0,
+                cost_dice=1.0,
+            )
 
     @classmethod
     def from_config(cls, cfg):
@@ -87,15 +101,25 @@ class MaskFormer(nn.Module):
         no_object_weight = cfg.MODEL.MASK_FORMER.NO_OBJECT_WEIGHT
         dice_weight = cfg.MODEL.MASK_FORMER.DICE_WEIGHT
         mask_weight = cfg.MODEL.MASK_FORMER.MASK_WEIGHT
+        entity = cfg.MODEL.MASK_FORMER.ENTITY
 
         # building criterion
-        matcher = HungarianMatcher(
-            cost_class=1,
-            cost_mask=mask_weight,
-            cost_dice=dice_weight,
-        )
+        if cfg.MODEL.MASK_FORMER.MATCHER == "HungarianMatcher":
+            matcher = HungarianMatcher(
+                cost_class=1,
+                cost_mask=mask_weight,
+                cost_dice=dice_weight,
+            )
+        elif cfg.MODEL.MASK_FORMER.MATCHER == "EntityHungarianMatcher":
+            matcher = HungarianMatcher_entity(
+                cost_class=1,
+                cost_mask=mask_weight,
+                cost_dice=dice_weight,
+            )
 
         weight_dict = {"loss_ce": 1, "loss_mask": mask_weight, "loss_dice": dice_weight}
+        if cfg.MODEL.MASK_FORMER.ENTITY_WEIGHT is not None:
+            weight_dict.update({"loss_ce_entity": cfg.MODEL.MASK_FORMER.ENTITY_WEIGHT})
         if deep_supervision:
             dec_layers = cfg.MODEL.MASK_FORMER.DEC_LAYERS
             aux_weight_dict = {}
@@ -111,6 +135,7 @@ class MaskFormer(nn.Module):
             weight_dict=weight_dict,
             eos_coef=no_object_weight,
             losses=losses,
+            entity=entity,
         )
 
         return {
@@ -124,11 +149,13 @@ class MaskFormer(nn.Module):
             "metadata": MetadataCatalog.get(cfg.DATASETS.TRAIN[0]),
             "size_divisibility": cfg.MODEL.MASK_FORMER.SIZE_DIVISIBILITY,
             "sem_seg_postprocess_before_inference": (
-                cfg.MODEL.MASK_FORMER.TEST.SEM_SEG_POSTPROCESSING_BEFORE_INFERENCE
-                or cfg.MODEL.MASK_FORMER.TEST.PANOPTIC_ON
+                    cfg.MODEL.MASK_FORMER.TEST.SEM_SEG_POSTPROCESSING_BEFORE_INFERENCE
+                    or cfg.MODEL.MASK_FORMER.TEST.PANOPTIC_ON
             ),
             "pixel_mean": cfg.MODEL.PIXEL_MEAN,
             "pixel_std": cfg.MODEL.PIXEL_STD,
+            "entity_test": cfg.MODEL.MASK_FORMER.TEST.ENTITY_ON,
+            "entity": entity,
         }
 
     @property
@@ -200,7 +227,7 @@ class MaskFormer(nn.Module):
 
             processed_results = []
             for mask_cls_result, mask_pred_result, input_per_image, image_size in zip(
-                mask_cls_results, mask_pred_results, batched_inputs, images.image_sizes
+                    mask_cls_results, mask_pred_results, batched_inputs, images.image_sizes
             ):
                 height = input_per_image.get("height", image_size[0])
                 width = input_per_image.get("width", image_size[1])
@@ -210,8 +237,60 @@ class MaskFormer(nn.Module):
                         mask_pred_result, image_size, height, width
                     )
 
-                # semantic segmentation inference
-                r = self.semantic_inference(mask_cls_result, mask_pred_result)
+                if not self.entity:
+                    # semantic segmentation inference
+                    r = self.semantic_inference(mask_cls_result, mask_pred_result)
+                else:
+                    r = self.semantic_inference_entity(mask_cls_result, mask_pred_result)
+
+                if self.entity_test_on:
+                    r = r[:, : image_size[0], : image_size[1]]
+                    tmp = r.argmax(dim=0)
+                    # clean pred
+                    pred = torch.zeros_like(r)
+                    for cls in tmp.unique():
+                        pred[cls] = tmp == cls
+
+                    sem_seg_gt = batched_inputs[0]["sem_seg"].to(self.device)
+                    targets = []
+                    labels = []
+                    masks = []
+                    for gt_cls in sem_seg_gt.unique():
+                        if gt_cls == 255:
+                            continue
+                        # pad gt
+                        gt_mask = sem_seg_gt == gt_cls
+                        labels.append(gt_cls)
+                        masks.append(gt_mask)
+                    labels = torch.as_tensor(labels)
+                    masks = torch.stack(masks)
+                    targets.append(
+                        {
+                            "labels": labels,
+                            "masks": masks,
+                        }
+                    )
+
+                    outputs = {"pred_masks": pred.unsqueeze(0)}
+                    indices = self.matcher(outputs, targets)
+                    gt_cls_indices = targets[0]["labels"][indices[0][1]]
+                    # plot miss classification masks
+                    # err = indices[0][1] != torch.arange(len(indices[0][1]))
+                    # if err.sum() > 0:
+                    #     print()
+                    # renew r
+                    r = torch.zeros((150, pred.size(1), pred.size(-1)),
+                                    dtype=pred.dtype, device=self.device)
+                    for gt_idx, pred_idx in zip(gt_cls_indices, indices[0][0]):
+                        r[gt_idx] = pred[pred_idx]
+
+                # f, axarr = plt.subplots(2, 2)
+                # axarr[0,0].imshow(sem_seg_gt.to('cpu'))
+                # axarr[0,1].imshow(tmp.to('cpu'))
+                # new = r.argmax(dim=0)
+                # axarr[1,0].imshow(new.to('cpu'))
+                # axarr[1,1].imshow((new == tmp).to('cpu'))
+
                 if not self.sem_seg_postprocess_before_inference:
                     r = sem_seg_postprocess(r, image_size, height, width)
                 processed_results.append({"sem_seg": r})
@@ -222,6 +301,22 @@ class MaskFormer(nn.Module):
                     processed_results[-1]["panoptic_seg"] = panoptic_r
 
             return processed_results
+
+    def entity_inference(self, mask_cls, mask_pred):
+        scores, labels = mask_cls.sigmoid().max(dim=-1)
+        mask_pred = mask_pred.sigmoid()
+
+        keep = labels.ne(self.sem_seg_head.num_classes) & (scores > self.object_mask_threshold)
+        cur_scores = scores[keep]
+        cur_classes = labels[keep]
+        cur_masks = mask_pred[keep]
+
+        result = Instances([0, 0])
+        result.scores = cur_scores
+        result.classes = cur_classes
+        result.masks = cur_masks
+
+        return result
 
     def prepare_targets(self, targets, images):
         h, w = images.tensor.shape[-2:]
@@ -243,6 +338,12 @@ class MaskFormer(nn.Module):
         mask_cls = F.softmax(mask_cls, dim=-1)[..., :-1]
         mask_pred = mask_pred.sigmoid()
         semseg = torch.einsum("qc,qhw->chw", mask_cls, mask_pred)
+        return semseg
+
+    def semantic_inference_entity(self, mask_cls, mask_pred):
+        mask_cls = mask_cls.sigmoid()
+        mask_pred = mask_pred.sigmoid()
+        semseg = torch.einsum("qc,qhw->qhw", mask_cls, mask_pred)
         return semseg
 
     def panoptic_inference(self, mask_cls, mask_pred):
