@@ -111,17 +111,22 @@ class MaskFormer(nn.Module):
                 cost_dice=dice_weight,
             )
         elif cfg.MODEL.MASK_FORMER.MATCHER == "EntityHungarianMatcher":
+            print("use hungarian_entity matcher!!!!!!!!!!!!!!!!!")
             matcher = HungarianMatcher_entity(
                 cost_class=1,
                 cost_mask=mask_weight,
                 cost_dice=dice_weight,
             )
         elif cfg.MODEL.MASK_FORMER.MATCHER == "HungarianMatcher_diceonly":
+            print("use hungarian_diceonly matcher!!!!!!!!!!!!!!!!!")
             matcher = HungarianMatcher_diceonly(
                 cost_class=1,
                 cost_mask=20.0,
                 cost_dice=1.0,
             )
+        else:
+            print("no matcher is defined!!!")
+            assert False
 
         weight_dict = {"loss_ce": 1, "loss_mask": mask_weight, "loss_dice": dice_weight}
         if cfg.MODEL.MASK_FORMER.ENTITY_WEIGHT is not None:
