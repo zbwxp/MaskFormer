@@ -14,7 +14,7 @@ from detectron2.structures import ImageList
 
 from .modeling.criterion import SetCriterion
 from .modeling.matcher import HungarianMatcher
-from .modeling.test_matcher import HungarianMatcher_maskonly
+from .modeling.test_matcher import HungarianMatcher_diceonly
 from .modeling.entity_matcher import HungarianMatcher_entity
 from detectron2.structures import Instances, Boxes
 import matplotlib.pyplot as plt
@@ -85,7 +85,7 @@ class MaskFormer(nn.Module):
         self.entity_test_on = entity_test
         self.entity = entity
         if self.entity_test_on:
-            self.matcher = HungarianMatcher_maskonly(
+            self.matcher = HungarianMatcher_diceonly(
                 cost_class=1,
                 cost_mask=20.0,
                 cost_dice=1.0,
@@ -115,6 +115,12 @@ class MaskFormer(nn.Module):
                 cost_class=1,
                 cost_mask=mask_weight,
                 cost_dice=dice_weight,
+            )
+        elif cfg.MODEL.MASK_FORMER.MATCHER == "HungarianMatcher_diceonly":
+            matcher = HungarianMatcher_diceonly(
+                cost_class=1,
+                cost_mask=20.0,
+                cost_dice=1.0,
             )
 
         weight_dict = {"loss_ce": 1, "loss_mask": mask_weight, "loss_dice": dice_weight}
@@ -244,12 +250,11 @@ class MaskFormer(nn.Module):
                     r = self.semantic_inference_entity(mask_cls_result, mask_pred_result)
 
                 if self.entity_test_on:
+                    r = mask_pred_results[0]
                     r = r[:, : image_size[0], : image_size[1]]
                     tmp = r.argmax(dim=0)
-                    # clean pred
-                    pred = torch.zeros_like(r)
-                    for cls in tmp.unique():
-                        pred[cls] = tmp == cls
+                    pred = r.sigmoid()
+                    # pred = r
 
                     sem_seg_gt = batched_inputs[0]["sem_seg"].to(self.device)
                     targets = []
@@ -284,12 +289,15 @@ class MaskFormer(nn.Module):
                     for gt_idx, pred_idx in zip(gt_cls_indices, indices[0][0]):
                         r[gt_idx] = pred[pred_idx]
 
-                # f, axarr = plt.subplots(2, 2)
-                # axarr[0,0].imshow(sem_seg_gt.to('cpu'))
-                # axarr[0,1].imshow(tmp.to('cpu'))
-                # new = r.argmax(dim=0)
-                # axarr[1,0].imshow(new.to('cpu'))
-                # axarr[1,1].imshow((new == tmp).to('cpu'))
+                    # f, axarr = plt.subplots(2, 2)
+                    # sem_seg_gt[sem_seg_gt ==255] = 0
+                    # axarr[0,0].imshow(sem_seg_gt.to('cpu'))
+                    # axarr[0,1].imshow(tmp.to('cpu'))
+                    # new = r.argmax(dim=0)
+                    # axarr[1,0].imshow(new.to('cpu'))
+                    # axarr[1,1].imshow((new == tmp).to('cpu'))
+                    # filename = batched_inputs[0]["file_name"].split('/')[-1]
+                    # plt.savefig("/media/bz/D/美团/MaskFormer/plot/orig_argmax/{}".format(filename))
 
                 if not self.sem_seg_postprocess_before_inference:
                     r = sem_seg_postprocess(r, image_size, height, width)

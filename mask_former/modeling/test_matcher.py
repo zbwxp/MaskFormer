@@ -27,7 +27,7 @@ def batch_dice_loss(inputs, targets):
     return loss
 
 
-class HungarianMatcher_maskonly(nn.Module):
+class HungarianMatcher_diceonly(nn.Module):
     """This class computes an assignment between the targets and the predictions of the network
 
     For efficiency reasons, the targets don't include the no_object. Because of this, in general,
@@ -77,7 +77,7 @@ class HungarianMatcher_maskonly(nn.Module):
             # cost_class = -out_prob[:, tgt_ids]
 
             # Downsample gt masks to save memory
-            # tgt_mask = F.interpolate(tgt_mask[:, None], size=out_mask.shape[-2:], mode="nearest")
+            tgt_mask = F.interpolate(tgt_mask[:, None], size=out_mask.shape[-2:], mode="nearest")
 
             # Flatten spatial dimension
             out_mask = out_mask.flatten(1)  # [batch_size * num_queries, H*W]
