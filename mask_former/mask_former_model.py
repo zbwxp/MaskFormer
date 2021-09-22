@@ -18,7 +18,10 @@ from .modeling.test_matcher import HungarianMatcher_diceonly
 from .modeling.entity_matcher import HungarianMatcher_entity
 from detectron2.structures import Instances, Boxes
 import matplotlib.pyplot as plt
-
+from detectron2.layers import Conv2d, ShapeSpec, get_norm
+from typing import Callable, Dict, List, Optional, Tuple, Union
+import fvcore.nn.weight_init as weight_init
+from .modeling.transformer.transformer_predictor import MLP
 
 @META_ARCH_REGISTRY.register()
 class MaskFormer(nn.Module):
@@ -44,6 +47,10 @@ class MaskFormer(nn.Module):
             pixel_std: Tuple[float],
             entity_test: bool,
             entity: bool,
+            conv_dim: int,
+            mask_dim: int,
+            norm: Optional[Union[str, Callable]] = None,
+            num_classes: int,
     ):
         """
         Args:
@@ -90,6 +97,38 @@ class MaskFormer(nn.Module):
                 cost_mask=20.0,
                 cost_dice=1.0,
             )
+        if self.entity:
+            self.cls_head = MLP(mask_dim, mask_dim, num_classes, 3)
+            use_bias = norm == ""
+            output_norm = get_norm(norm, conv_dim)
+            self.classifyer = nn.Sequential(
+                Conv2d(conv_dim,
+                       mask_dim,
+                       kernel_size=3,
+                       stride=1,
+                       padding=1,
+                       bias=use_bias,
+                       norm=output_norm,
+                       activation=F.relu,),
+                Conv2d(mask_dim,
+                       mask_dim,
+                       kernel_size=3,
+                       stride=1,
+                       padding=1,
+                       bias=use_bias,
+                       norm=output_norm,
+                       activation=F.relu,),
+                Conv2d(mask_dim,
+                       mask_dim,
+                       kernel_size=3,
+                       stride=1,
+                       padding=1,),
+            )
+
+            for layer in self.classifyer:
+                weight_init.c2_xavier_fill(layer)
+        self.register_buffer("_iter", torch.zeros([1]))
+        self._warmup_iters = 4000
 
     @classmethod
     def from_config(cls, cfg):
@@ -131,6 +170,8 @@ class MaskFormer(nn.Module):
         weight_dict = {"loss_ce": 1, "loss_mask": mask_weight, "loss_dice": dice_weight}
         if cfg.MODEL.MASK_FORMER.ENTITY_WEIGHT is not None:
             weight_dict.update({"loss_ce_entity": cfg.MODEL.MASK_FORMER.ENTITY_WEIGHT})
+        if cfg.MODEL.MASK_FORMER.ENTITY:
+            weight_dict.update({"loss_entity_cls": 1})
         if deep_supervision:
             dec_layers = cfg.MODEL.MASK_FORMER.DEC_LAYERS
             aux_weight_dict = {}
@@ -167,6 +208,10 @@ class MaskFormer(nn.Module):
             "pixel_std": cfg.MODEL.PIXEL_STD,
             "entity_test": cfg.MODEL.MASK_FORMER.TEST.ENTITY_ON,
             "entity": entity,
+            "conv_dim": cfg.MODEL.SEM_SEG_HEAD.CONVS_DIM,
+            "mask_dim": cfg.MODEL.SEM_SEG_HEAD.MASK_DIM,
+            "norm": cfg.MODEL.SEM_SEG_HEAD.NORM,
+            "num_classes": cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES,
         }
 
     @property
@@ -207,6 +252,7 @@ class MaskFormer(nn.Module):
         outputs = self.sem_seg_head(features)
 
         if self.training:
+            self._iter += 1
             # mask classification target
             if "instances" in batched_inputs[0]:
                 gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
@@ -216,6 +262,35 @@ class MaskFormer(nn.Module):
 
             # bipartite matching-based loss
             losses = self.criterion(outputs, targets)
+
+            if self.entity:
+                cls_feature_map = outputs["cls_feature_map"]
+                cls_feature_map = self.classifyer(cls_feature_map)
+                labels = [t["labels"] for t in targets]
+                masks = [t["masks"] for t in targets]
+                bs, ch, h, w = cls_feature_map.size()
+                masked_avg_pool = []
+                for b in range(bs):
+                    n_inst = masks[b].size(0)
+                    if n_inst == 0:
+                        print("got zero instance per img!!!!!!!!!!")
+                        continue
+                    per_im_masks = F.interpolate(masks[b].unsqueeze(0).float(), size=[h, w],
+                                                 mode="bilinear", align_corners=False)
+                    per_im_mask_weights = per_im_masks.reshape(n_inst, -1).sum(dim=-1)
+                    masked_avg_pool.append(((cls_feature_map[b].unsqueeze(1)
+                                             * per_im_masks).reshape(ch, n_inst, -1)
+                                            .sum(dim=-1) / (per_im_mask_weights[None, :] + 1.0))
+                                           .permute(1, 0))
+
+                if not masked_avg_pool == []:
+                    masked_avg_pool = torch.cat(masked_avg_pool)
+                    labels = torch.cat(labels)
+                    cls_preds = self.cls_head(masked_avg_pool)
+
+                    loss_entity_cls = F.cross_entropy(cls_preds, labels)
+                    warmup_factor = min(self._iter.item() / float(self._warmup_iters), 1.0)
+                    losses.update({"loss_entity_cls": loss_entity_cls * warmup_factor})
 
             for k in list(losses.keys()):
                 if k in self.criterion.weight_dict:

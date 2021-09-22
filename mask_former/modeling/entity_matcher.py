@@ -128,7 +128,7 @@ class HungarianMatcher_entity(nn.Module):
             # Final cost matrix
             C = (
                 self.cost_mask * cost_mask
-                # + self.cost_class * cost_class
+                + self.cost_class * cost_class
                 + self.cost_dice * cost_dice
             )
             C = C.reshape(num_queries, -1).cpu()

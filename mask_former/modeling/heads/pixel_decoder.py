@@ -141,7 +141,8 @@ class BasePixelDecoder(nn.Module):
                 # Following FPN implementation, we use nearest upsampling here
                 y = cur_fpn + F.interpolate(y, size=cur_fpn.shape[-2:], mode="nearest")
                 y = output_conv(y)
-        return self.mask_features(y), None
+        cls_map = y.clone().detach()
+        return self.mask_features(y), None, cls_map
 
     def forward(self, features, targets=None):
         logger = logging.getLogger(__name__)

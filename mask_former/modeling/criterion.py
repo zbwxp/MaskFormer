@@ -98,7 +98,7 @@ class SetCriterion(nn.Module):
             src_logits.shape[:2], self.num_classes, dtype=torch.int64, device=src_logits.device
         )
         target_classes[idx] = target_classes_o
-        if self.entity:
+        if src_logits.size(-1) == 1:
             target_classes = target_classes.float()
             target_classes_o = target_classes_o * 0 + 1.0
             target_classes[idx] = target_classes_o
@@ -180,6 +180,8 @@ class SetCriterion(nn.Module):
 
         # Compute all the requested losses
         losses = {}
+        losses.update({"indices": indices})
+        losses.update({"num_masks": num_masks})
         for loss in self.losses:
             losses.update(self.get_loss(loss, outputs, targets, indices, num_masks))
 
