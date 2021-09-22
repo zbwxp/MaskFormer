@@ -51,6 +51,9 @@ def add_mask_former_config(cfg):
     cfg.MODEL.MASK_FORMER.ENTITY = False
     cfg.MODEL.MASK_FORMER.ENTITY_WEIGHT = None
     cfg.MODEL.MASK_FORMER.MATCHER = "HungarianMatcher"
+    cfg.MODEL.MASK_FORMER.USE_PRED_LOSS = False
+    cfg.MODEL.MASK_FORMER.ITER_MATCHER = False
+    cfg.MODEL.MASK_FORMER.ITER_LOSS = False
 
     # mask_former inference config
     cfg.MODEL.MASK_FORMER.TEST = CN()

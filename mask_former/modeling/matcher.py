@@ -86,7 +86,7 @@ class HungarianMatcher(nn.Module):
         assert cost_class != 0 or cost_mask != 0 or cost_dice != 0, "all costs cant be 0"
 
     @torch.no_grad()
-    def memory_efficient_forward(self, outputs, targets):
+    def memory_efficient_forward(self, outputs, targets, _iter=None):
         """More memory-friendly matching"""
         bs, num_queries = outputs["pred_logits"].shape[:2]
 
@@ -124,10 +124,12 @@ class HungarianMatcher(nn.Module):
 
             # Compute the dice loss betwen masks
             cost_dice = batch_dice_loss(out_mask, tgt_mask)
-
+            cooldown_factor = 1.0
+            if _iter is not None:
+                cooldown_factor = max(1 - _iter / float(8000), 0.0)
             # Final cost matrix
             C = (
-                self.cost_mask * cost_mask
+                self.cost_mask * cost_mask * cooldown_factor
                 + self.cost_class * cost_class
                 + self.cost_dice * cost_dice
             )
@@ -140,7 +142,7 @@ class HungarianMatcher(nn.Module):
         ]
 
     @torch.no_grad()
-    def forward(self, outputs, targets):
+    def forward(self, outputs, targets, iter=None):
         """Performs the matching
 
         Params:
@@ -160,7 +162,7 @@ class HungarianMatcher(nn.Module):
             For each batch element, it holds:
                 len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
         """
-        return self.memory_efficient_forward(outputs, targets)
+        return self.memory_efficient_forward(outputs, targets, iter)
 
     def __repr__(self):
         head = "Matcher " + self.__class__.__name__

@@ -23,6 +23,7 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 import fvcore.nn.weight_init as weight_init
 from .modeling.transformer.transformer_predictor import MLP
 
+
 @META_ARCH_REGISTRY.register()
 class MaskFormer(nn.Module):
     """
@@ -51,6 +52,9 @@ class MaskFormer(nn.Module):
             mask_dim: int,
             norm: Optional[Union[str, Callable]] = None,
             num_classes: int,
+            use_pred_loss: bool,
+            iter_matcher: bool,
+            iter_loss: bool,
     ):
         """
         Args:
@@ -91,6 +95,8 @@ class MaskFormer(nn.Module):
         self.register_buffer("pixel_std", torch.Tensor(pixel_std).view(-1, 1, 1), False)
         self.entity_test_on = entity_test
         self.entity = entity
+        self.iter_matcher = iter_matcher
+        self.iter_loss = iter_loss
         if self.entity_test_on:
             self.matcher = HungarianMatcher_diceonly(
                 cost_class=1,
@@ -98,6 +104,7 @@ class MaskFormer(nn.Module):
                 cost_dice=1.0,
             )
         if self.entity:
+            self.use_pred_loss = use_pred_loss
             self.cls_head = MLP(mask_dim, mask_dim, num_classes, 3)
             use_bias = norm == ""
             output_norm = get_norm(norm, conv_dim)
@@ -109,7 +116,7 @@ class MaskFormer(nn.Module):
                        padding=1,
                        bias=use_bias,
                        norm=output_norm,
-                       activation=F.relu,),
+                       activation=F.relu, ),
                 Conv2d(mask_dim,
                        mask_dim,
                        kernel_size=3,
@@ -117,12 +124,12 @@ class MaskFormer(nn.Module):
                        padding=1,
                        bias=use_bias,
                        norm=output_norm,
-                       activation=F.relu,),
+                       activation=F.relu, ),
                 Conv2d(mask_dim,
                        mask_dim,
                        kernel_size=3,
                        stride=1,
-                       padding=1,),
+                       padding=1, ),
             )
 
             for layer in self.classifyer:
@@ -172,6 +179,8 @@ class MaskFormer(nn.Module):
             weight_dict.update({"loss_ce_entity": cfg.MODEL.MASK_FORMER.ENTITY_WEIGHT})
         if cfg.MODEL.MASK_FORMER.ENTITY:
             weight_dict.update({"loss_entity_cls": 1})
+        if cfg.MODEL.MASK_FORMER.USE_PRED_LOSS:
+            weight_dict.update({"loss_entity_cls_pred": 1})
         if deep_supervision:
             dec_layers = cfg.MODEL.MASK_FORMER.DEC_LAYERS
             aux_weight_dict = {}
@@ -212,6 +221,9 @@ class MaskFormer(nn.Module):
             "mask_dim": cfg.MODEL.SEM_SEG_HEAD.MASK_DIM,
             "norm": cfg.MODEL.SEM_SEG_HEAD.NORM,
             "num_classes": cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES,
+            "use_pred_loss": cfg.MODEL.MASK_FORMER.USE_PRED_LOSS,
+            "iter_matcher": cfg.MODEL.MASK_FORMER.ITER_MATCHER,
+            "iter_loss": cfg.MODEL.MASK_FORMER.ITER_LOSS,
         }
 
     @property
@@ -261,9 +273,13 @@ class MaskFormer(nn.Module):
                 targets = None
 
             # bipartite matching-based loss
-            losses = self.criterion(outputs, targets)
+            _iter = self._iter
+            if not self.iter_matcher:
+                _iter = 0.0
+            losses = self.criterion(outputs, targets, _iter)
 
             if self.entity:
+                warmup_factor = min(self._iter.item() / float(self._warmup_iters), 1.0)
                 cls_feature_map = outputs["cls_feature_map"]
                 cls_feature_map = self.classifyer(cls_feature_map)
                 labels = [t["labels"] for t in targets]
@@ -277,22 +293,49 @@ class MaskFormer(nn.Module):
                         continue
                     per_im_masks = F.interpolate(masks[b].unsqueeze(0).float(), size=[h, w],
                                                  mode="bilinear", align_corners=False)
-                    per_im_mask_weights = per_im_masks.reshape(n_inst, -1).sum(dim=-1)
-                    masked_avg_pool.append(((cls_feature_map[b].unsqueeze(1)
-                                             * per_im_masks).reshape(ch, n_inst, -1)
-                                            .sum(dim=-1) / (per_im_mask_weights[None, :] + 1.0))
-                                           .permute(1, 0))
+                    per_im_mask_weights = per_im_masks.flatten(-2).sum(dim=-1)
+                    masked_avg_pool.append(
+                        (torch.einsum("chw,bqhw->qc", cls_feature_map[b], per_im_masks)
+                         / (per_im_mask_weights[0][:, None] + 1.0)))
 
                 if not masked_avg_pool == []:
                     masked_avg_pool = torch.cat(masked_avg_pool)
-                    labels = torch.cat(labels)
-                    cls_preds = self.cls_head(masked_avg_pool)
-
-                    loss_entity_cls = F.cross_entropy(cls_preds, labels)
-                    warmup_factor = min(self._iter.item() / float(self._warmup_iters), 1.0)
+                    ce_labels = torch.cat(labels)
+                    ce_cls_preds_logits = self.cls_head(masked_avg_pool)
+                    loss_entity_cls = F.cross_entropy(ce_cls_preds_logits, ce_labels)
                     losses.update({"loss_entity_cls": loss_entity_cls * warmup_factor})
 
+
+                if self.use_pred_loss:
+                    pred = outputs["pred_masks"].sigmoid()
+                    pred = (pred > 0.5).float()
+                    mask_weights = pred.flatten(-2).sum(dim=-1)
+                    masked_avg_pool = (torch.einsum("bqhw,bchw->bqc", pred, cls_feature_map)
+                                       / (mask_weights[:, :, None] + 1.0))
+                    bce_cls_preds_logits = self.cls_head(masked_avg_pool)
+                    # prepare target
+                    bce_targets = torch.zeros_like(bce_cls_preds_logits)
+                    indices = losses["indices"]
+                    outputs = {"pred_masks": pred}
+                    indices = self.matcher(outputs, targets)
+
+                    for b in range(bs):
+                        label = labels[b]
+                        mask = masks[b]
+                        pred_idxs = indices[b][0]
+                        gt_idxs = indices[b][1]
+                        bce_targets[b][pred_idxs, label[gt_idxs]] = 1.0
+
+                    loss_entity_pred_cls = F.binary_cross_entropy_with_logits(bce_cls_preds_logits, bce_targets)
+                    losses.update({"loss_entity_cls_pred": loss_entity_pred_cls * warmup_factor})
+
+
             for k in list(losses.keys()):
+                if self.iter_loss:
+                    for key in self.criterion.weight_dict:
+                        if "loss_mask" in key:
+                            cooldown_factor = max(1 - self._iter / float(16000), 0.0).item()
+                            self.criterion.weight_dict.update({key: 20.0 * cooldown_factor})
                 if k in self.criterion.weight_dict:
                     losses[k] *= self.criterion.weight_dict[k]
                 else:
