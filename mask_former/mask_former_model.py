@@ -22,7 +22,7 @@ from detectron2.layers import Conv2d, ShapeSpec, get_norm
 from typing import Callable, Dict, List, Optional, Tuple, Union
 import fvcore.nn.weight_init as weight_init
 from .modeling.transformer.transformer_predictor import MLP
-
+from .modeling.dual_criterion import SetDualCriterion
 
 @META_ARCH_REGISTRY.register()
 class MaskFormer(nn.Module):
@@ -190,14 +190,35 @@ class MaskFormer(nn.Module):
 
         losses = ["labels", "masks"]
 
-        criterion = SetCriterion(
-            sem_seg_head.num_classes,
-            matcher=matcher,
-            weight_dict=weight_dict,
-            eos_coef=no_object_weight,
-            losses=losses,
-            entity=entity,
-        )
+        if cfg.MODEL.MASK_FORMER.DUAL_CRITERION:
+            matcher1 = HungarianMatcher_entity(
+                cost_class=1,
+                cost_mask=mask_weight,
+                cost_dice=dice_weight,
+            )
+            matcher2 = HungarianMatcher_diceonly(
+                cost_class=1,
+                cost_mask=20.0,
+                cost_dice=1.0,
+            )
+            criterion = SetDualCriterion(
+                sem_seg_head.num_classes,
+                matcher1=matcher1,
+                matcher2=matcher2,
+                weight_dict=weight_dict,
+                eos_coef=no_object_weight,
+                losses=losses,
+                entity=entity,
+            )
+        else:
+            criterion = SetCriterion(
+                sem_seg_head.num_classes,
+                matcher=matcher,
+                weight_dict=weight_dict,
+                eos_coef=no_object_weight,
+                losses=losses,
+                entity=entity,
+            )
 
         return {
             "backbone": backbone,

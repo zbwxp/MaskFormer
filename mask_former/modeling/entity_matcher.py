@@ -100,17 +100,17 @@ class HungarianMatcher_entity(nn.Module):
         # Iterate through batch size
         for b in range(bs):
 
-            out_prob = outputs["pred_logits"][b].sigmoid()  # [num_queries, num_classes]
+            # out_prob = outputs["pred_logits"][b].sigmoid()  # [num_queries, num_classes]
             out_mask = outputs["pred_masks"][b]  # [num_queries, H_pred, W_pred]
 
-            tgt_ids = targets[b]["labels"]
+            # tgt_ids = targets[b]["labels"]
             # gt masks are already padded when preparing target
             tgt_mask = targets[b]["masks"].to(out_mask)
 
             # Compute the classification cost. Contrary to the loss, we don't use the NLL,
             # but approximate it in 1 - proba[target class].
             # The 1 is a constant that doesn't change the matching, it can be ommitted.
-            cost_class = -out_prob.repeat(1, tgt_ids.size(0))
+            # cost_class = -out_prob.repeat(1, tgt_ids.size(0))
 
             # Downsample gt masks to save memory
             tgt_mask = F.interpolate(tgt_mask[:, None], size=out_mask.shape[-2:], mode="nearest")
@@ -128,7 +128,7 @@ class HungarianMatcher_entity(nn.Module):
             # Final cost matrix
             C = (
                 self.cost_mask * cost_mask
-                + self.cost_class * cost_class
+                # + self.cost_class * cost_class
                 + self.cost_dice * cost_dice
             )
             C = C.reshape(num_queries, -1).cpu()

@@ -54,6 +54,7 @@ def add_mask_former_config(cfg):
     cfg.MODEL.MASK_FORMER.USE_PRED_LOSS = False
     cfg.MODEL.MASK_FORMER.ITER_MATCHER = False
     cfg.MODEL.MASK_FORMER.ITER_LOSS = False
+    cfg.MODEL.MASK_FORMER.DUAL_CRITERION = False
 
     # mask_former inference config
     cfg.MODEL.MASK_FORMER.TEST = CN()
