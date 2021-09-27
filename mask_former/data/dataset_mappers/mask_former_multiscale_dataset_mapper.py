@@ -166,7 +166,7 @@ class MaskFormerMultiClsDatasetMapper:
             cls_for_anno = dataset_dict["category"]
 
             if cls_for_anno not in classes:
-                print("the anno is masked out by augmentation!!!!")
+                # print("the anno is masked out by augmentation!!!!")
                 return None
             classes = [cls_for_anno]
             # remove ignored region
