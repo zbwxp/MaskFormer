@@ -38,7 +38,9 @@ from mask_former import (
     MaskFormerSemanticDatasetMapper,
     SemanticSegmentorWithTTA,
     add_mask_former_config,
+    MaskFormerMultiClsDatasetMapper,
 )
+from evaluation import ClsEvaluator
 
 
 class Trainer(DefaultTrainer):
@@ -61,6 +63,12 @@ class Trainer(DefaultTrainer):
         evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
         if cfg.MODEL.MASK_FORMER.DEFORMABLE_PREDICTOR:
             evaluator_type = "sem_seg"
+        if evaluator_type in ["classification"]:
+            evaluator_list.append(
+                ClsEvaluator(
+                    dataset_name,
+                    distributed=True,
+                ))
         if evaluator_type in ["sem_seg", "ade20k_panoptic_seg"]:
             evaluator_list.append(
                 SemSegEvaluator(
@@ -79,17 +87,17 @@ class Trainer(DefaultTrainer):
             evaluator_list.append(COCOPanopticEvaluator(dataset_name, output_folder))
         if evaluator_type == "cityscapes_instance":
             assert (
-                torch.cuda.device_count() >= comm.get_rank()
+                    torch.cuda.device_count() >= comm.get_rank()
             ), "CityscapesEvaluator currently do not work with multiple machines."
             return CityscapesInstanceEvaluator(dataset_name)
         if evaluator_type == "cityscapes_sem_seg":
             assert (
-                torch.cuda.device_count() >= comm.get_rank()
+                    torch.cuda.device_count() >= comm.get_rank()
             ), "CityscapesEvaluator currently do not work with multiple machines."
             return CityscapesSemSegEvaluator(dataset_name)
         if evaluator_type == "cityscapes_panoptic_seg":
             assert (
-                torch.cuda.device_count() >= comm.get_rank()
+                    torch.cuda.device_count() >= comm.get_rank()
             ), "CityscapesEvaluator currently do not work with multiple machines."
             evaluator_list.append(CityscapesSemSegEvaluator(dataset_name))
         if len(evaluator_list) == 0:
@@ -110,6 +118,8 @@ class Trainer(DefaultTrainer):
         # Panoptic segmentation dataset mapper
         elif cfg.INPUT.DATASET_MAPPER_NAME == "mask_former_panoptic":
             mapper = MaskFormerPanopticDatasetMapper(cfg, True)
+        elif cfg.INPUT.DATASET_MAPPER_NAME == "mask_former_multi_cls":
+            mapper = MaskFormerMultiClsDatasetMapper(cfg, True)
         # DETR-style dataset mapper for COCO panoptic segmentation
         elif cfg.INPUT.DATASET_MAPPER_NAME == "detr_panoptic":
             mapper = DETRPanopticDatasetMapper(cfg, True)
@@ -163,8 +173,8 @@ class Trainer(DefaultTrainer):
                 if "backbone" in module_name:
                     hyperparams["lr"] = hyperparams["lr"] * cfg.SOLVER.BACKBONE_MULTIPLIER
                 if (
-                    "relative_position_bias_table" in module_param_name
-                    or "absolute_pos_embed" in module_param_name
+                        "relative_position_bias_table" in module_param_name
+                        or "absolute_pos_embed" in module_param_name
                 ):
                     print(module_param_name)
                     hyperparams["weight_decay"] = 0.0
@@ -178,9 +188,9 @@ class Trainer(DefaultTrainer):
             # detectron2 doesn't have full model gradient clipping now
             clip_norm_val = cfg.SOLVER.CLIP_GRADIENTS.CLIP_VALUE
             enable = (
-                cfg.SOLVER.CLIP_GRADIENTS.ENABLED
-                and cfg.SOLVER.CLIP_GRADIENTS.CLIP_TYPE == "full_model"
-                and clip_norm_val > 0.0
+                    cfg.SOLVER.CLIP_GRADIENTS.ENABLED
+                    and cfg.SOLVER.CLIP_GRADIENTS.CLIP_TYPE == "full_model"
+                    and clip_norm_val > 0.0
             )
 
             class FullModelGradientClippingOptimizer(optim):
