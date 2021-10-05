@@ -25,7 +25,7 @@ from .modeling.transformer.transformer_predictor import MLP
 from .modeling.dual_criterion import SetDualCriterion
 from .modeling.backbone.resnet_150cls import build_resnet_classification_backbone
 from detectron2.layers import ShapeSpec
-
+from skimage.morphology import erosion, dilation
 
 @META_ARCH_REGISTRY.register()
 class MaskedClassification(nn.Module):
@@ -125,6 +125,72 @@ class MaskedClassification(nn.Module):
             masks = ImageList.from_tensors(masks, self.size_divisibility)
             input_images = images.tensor
             input_masks = masks.tensor.float()
+            # augs
+            for i, mask in enumerate(input_masks):
+                orig_mask = mask.clone()
+                # if torch.rand(1) > 0.5:
+                # random erosion
+                if torch.rand(1) > 0.2:
+                    mask = F.interpolate(mask[None, :], scale_factor=0.125, mode='bilinear',
+                                           align_corners=False)[0]
+                    _, mask_height, mask_width = mask.size()
+                    new_mask = torch.zeros_like(mask[0])
+                    finds_y, finds_x = torch.nonzero(mask[0] == 1, as_tuple=True)
+                    if len(finds_y) == 0:
+                        continue
+                    x1 = torch.min(finds_x)
+                    x2 = torch.max(finds_x)
+                    y1 = torch.min(finds_y)
+                    y2 = torch.max(finds_y)
+                    if x2 - x1 == 0 or y2 - y1 == 0:
+                        continue
+                    width = x2 - x1
+                    height = y2 - y1
+                    rand1 = torch.rand(1, device=self.device)
+                    rand2 = torch.rand(1, device=self.device)
+                    rand3 = torch.randn(1, device=self.device) + 1
+                    rand4 = torch.randn(1, device=self.device) + 1
+                    rand5 = torch.rand(1, device=self.device)
+                    rand6 = torch.rand(1, device=self.device) - 0.2
+
+
+                    finds_y = (torch.rand(finds_y.size(), device=self.device)-0.5 * rand3)\
+                              * height * rand1 * 0.2 + finds_y.float()
+                    finds_x = (torch.rand(finds_x.size(), device=self.device)-0.5 * rand4)\
+                              * width * rand2 * 0.2 + finds_x.float()
+
+                    finds_y[finds_y > mask_height - 1] = mask_height - 1
+                    finds_x[finds_x > mask_width - 1] = mask_width - 1
+
+                    new_mask[finds_y.long(), finds_x.long()] = 1
+                    new_mask += 0.2 * rand5 * mask[0]
+                    scale_factor = 0.25
+                    if torch.rand(1) > 0.5:
+                        scale_factor *= 2
+                    # if torch.rand(1) > 0.5:
+                    #     scale_factor *= 2
+                    # if torch.rand(1) > 0.5:
+                    #     scale_factor *= 2
+                    shirnk = F.interpolate(new_mask[None, None, :], scale_factor=scale_factor, mode='bilinear', align_corners=False)
+                    expand = F.interpolate(shirnk, orig_mask.size()[-2:], mode='bilinear', align_corners=False)
+                    new_mask = expand[0, 0] + 0.2 * rand6 * orig_mask
+                    new_mask = (new_mask > 0.5).float()
+                    if new_mask.sum() < 64:
+                        new_mask = orig_mask
+                    mask = new_mask
+
+                if torch.rand(1) > 0.5:
+                    shirnk = F.interpolate(mask[None, :], scale_factor=0.125, mode='bilinear', align_corners=False)
+                    expand = F.interpolate(shirnk, orig_mask.size()[-2:], mode='bilinear', align_corners=False)
+                    mask = (expand[0] > 0.5).float()
+
+                input_masks[i] = mask
+
+                # f, axarr = plt.subplots(2, 2)
+                # axarr[0, 0].imshow(orig_mask[0].to('cpu'))
+                # axarr[0, 1].imshow(input_masks[i][0].to('cpu'))
+                # print()
+
             inputs = torch.cat((input_images, input_masks), dim=1)
         else:
             input_images = images.tensor
