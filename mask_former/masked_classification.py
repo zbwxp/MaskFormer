@@ -204,6 +204,8 @@ class MaskedClassification(nn.Module):
 
         if self.training:
             self._iter += 1
+            if self._iter == 1:
+                print("use focal loss!!!")
             # mask classification target
             if "instances" in batched_inputs[0]:
                 gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
@@ -217,7 +219,13 @@ class MaskedClassification(nn.Module):
             pred_logits = outputs["linear"]
             tgt = torch.cat([x["labels"] for x in targets])
 
-            loss_ce = F.cross_entropy(pred_logits, tgt)
+            # loss_ce = F.cross_entropy(pred_logits, tgt)
+            # naive focal loss
+            prob = F.softmax(pred_logits, -1)
+            prob = torch.stack([i_prob[i_tg] for i_prob, i_tg in zip(prob, tgt)])
+            loss_ce = (1-prob)**2 * F.cross_entropy(pred_logits, tgt, reduction='none')
+            loss_ce = loss_ce.mean()
+
             losses = {"loss_ce": loss_ce}
 
             return losses
