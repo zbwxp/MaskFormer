@@ -110,6 +110,15 @@ class ClsEvaluator(DatasetEvaluator):
             pred.append(p['pred'])
         pred = torch.stack(pred, dim=0)
         target = torch.as_tensor(target, dtype=pred.dtype)
+        categories, counts = target.unique(return_counts=True)
+        match =pred.eq(target)
+        per_cate_acc = []
+        for cate, count in zip(categories, counts):
+            correct = match[target==cate].sum()
+            per_cate_acc.append(correct/count)
+            print("category: "+str(cate.item())+" occurance: "+ str(count.item()) +" acc: "+str((correct/count).item()))
+
+
         num_samples = target.size(0)
 
         pred = pred.t()

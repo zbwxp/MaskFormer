@@ -125,14 +125,15 @@ class MaskedClassification(nn.Module):
             masks = ImageList.from_tensors(masks, self.size_divisibility)
             input_images = images.tensor
             input_masks = masks.tensor.float()
+            shirnk_mask = F.interpolate(input_masks, scale_factor=0.125, mode='bilinear',
+                                           align_corners=False)
             # augs
             for i, mask in enumerate(input_masks):
                 orig_mask = mask.clone()
                 # if torch.rand(1) > 0.5:
                 # random erosion
                 if torch.rand(1) > 0.2:
-                    mask = F.interpolate(mask[None, :], scale_factor=0.125, mode='bilinear',
-                                           align_corners=False)[0]
+                    mask = shirnk_mask[i]
                     _, mask_height, mask_width = mask.size()
                     new_mask = torch.zeros_like(mask[0])
                     finds_y, finds_x = torch.nonzero(mask[0] == 1, as_tuple=True)
@@ -189,6 +190,7 @@ class MaskedClassification(nn.Module):
                 # f, axarr = plt.subplots(2, 2)
                 # axarr[0, 0].imshow(orig_mask[0].to('cpu'))
                 # axarr[0, 1].imshow(input_masks[i][0].to('cpu'))
+                # axarr[1, 1].imshow(batched_inputs[i]['image'].permute(1,2,0))
                 # print()
 
             inputs = torch.cat((input_images, input_masks), dim=1)
@@ -204,8 +206,8 @@ class MaskedClassification(nn.Module):
 
         if self.training:
             self._iter += 1
-            if self._iter == 1:
-                print("use focal loss!!!")
+            # if self._iter == 1:
+            #     print("use focal loss!!!")
             # mask classification target
             if "instances" in batched_inputs[0]:
                 gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
@@ -219,12 +221,12 @@ class MaskedClassification(nn.Module):
             pred_logits = outputs["linear"]
             tgt = torch.cat([x["labels"] for x in targets])
 
-            # loss_ce = F.cross_entropy(pred_logits, tgt)
+            loss_ce = F.cross_entropy(pred_logits, tgt)
             # naive focal loss
-            prob = F.softmax(pred_logits, -1)
-            prob = torch.stack([i_prob[i_tg] for i_prob, i_tg in zip(prob, tgt)])
-            loss_ce = (1-prob)**2 * F.cross_entropy(pred_logits, tgt, reduction='none')
-            loss_ce = loss_ce.mean()
+            # prob = F.softmax(pred_logits, -1)
+            # prob = torch.stack([i_prob[i_tg] for i_prob, i_tg in zip(prob, tgt)])
+            # loss_ce = (1-prob)**2 * F.cross_entropy(pred_logits, tgt, reduction='none')
+            # loss_ce = loss_ce.mean()
 
             losses = {"loss_ce": loss_ce}
 

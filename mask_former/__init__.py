@@ -16,6 +16,9 @@ from .data.dataset_mappers.mask_former_semantic_dataset_mapper import (
 from .data.dataset_mappers.mask_former_multiscale_dataset_mapper import (
     MaskFormerMultiClsDatasetMapper,
 )
+from .data.dataset_mappers.mask_former_ccl_anno_dataset_mapper import (
+    MaskFormerCCLAnnoDatasetMapper
+)
 # models
 from .mask_former_model import MaskFormer
 from .masked_classification import MaskedClassification

@@ -39,6 +39,7 @@ from mask_former import (
     SemanticSegmentorWithTTA,
     add_mask_former_config,
     MaskFormerMultiClsDatasetMapper,
+    MaskFormerCCLAnnoDatasetMapper,
 )
 from evaluation import ClsEvaluator
 
@@ -120,6 +121,8 @@ class Trainer(DefaultTrainer):
             mapper = MaskFormerPanopticDatasetMapper(cfg, True)
         elif cfg.INPUT.DATASET_MAPPER_NAME == "mask_former_multi_cls":
             mapper = MaskFormerMultiClsDatasetMapper(cfg, True)
+        elif cfg.INPUT.DATASET_MAPPER_NAME == "mask_former_ccl_annos":
+            mapper = MaskFormerCCLAnnoDatasetMapper(cfg, True)
         # DETR-style dataset mapper for COCO panoptic segmentation
         elif cfg.INPUT.DATASET_MAPPER_NAME == "detr_panoptic":
             mapper = DETRPanopticDatasetMapper(cfg, True)
