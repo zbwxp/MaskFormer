@@ -48,7 +48,7 @@ INPUT:
     SIZE: (224, 224)
     SINGLE_CATEGORY_MAX_AREA: 1.0
   COLOR_AUG_SSD: True
-  SIZE_DIVISIBILITY: 32  # used in dataset mapper
+  SIZE_DIVISIBILITY: -1  # used in dataset mapper
   FORMAT: "RGB"
   DATASET_MAPPER_NAME: "mask_former_ccl_annos"
 SOLVER:
