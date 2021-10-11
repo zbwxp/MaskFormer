@@ -5,7 +5,7 @@ MODEL:
     FREEZE_AT: 0
   RESNETS:
     OUT_FEATURES: None
-    NORM: "SyncBN"
+    NORM: "BN"
 
   META_ARCHITECTURE: "MaskedClassification"
   SEM_SEG_HEAD:
@@ -37,7 +37,7 @@ MODEL:
 #    TEST:
 #      ENTITY_ON: True
 INPUT:
-  MIN_SIZE_TRAIN: [224,]
+  MIN_SIZE_TRAIN: [256,]
   MIN_SIZE_TRAIN_SAMPLING: "choice"
   MIN_SIZE_TEST: 224
   MAX_SIZE_TRAIN: 2048
