@@ -80,7 +80,7 @@ class MaskFormerCCLAnnoDatasetMapper:
                     cfg.MODEL.SEM_SEG_HEAD.IGNORE_VALUE,
                 )
             )
-        if cfg.INPUT.COLOR_AUG_SSD:
+        if cfg.INPUT.COLOR_AUG_SSD and is_train:
             augs.append(ColorAugSSDTransform(img_format=cfg.INPUT.FORMAT))
         augs.append(T.RandomFlip())
 
@@ -106,7 +106,7 @@ class MaskFormerCCLAnnoDatasetMapper:
         Returns:
             dict: a format that builtin models in detectron2 accept
         """
-        assert self.is_train, "MaskFormerSemanticDatasetMapper should only be used for training!"
+        # assert self.is_train, "MaskFormerSemanticDatasetMapper should only be used for training!"
 
         dataset_dict = copy.deepcopy(dataset_dict)  # it will be modified by code below
         image = utils.read_image(dataset_dict["file_name"], format=self.img_format)
@@ -248,73 +248,73 @@ class MaskFormerCCLAnnoDatasetMapper:
             # axarr[0, 0].imshow(dataset_dict['image'].permute(1, 2, 0))
             # axarr[0, 1].imshow(dataset_dict['instances'].gt_masks[0])
 
+            if self.is_train:
+                # augs to mask
+                masks = dataset_dict['instances'].gt_masks.float()[None, :]
+                shirnk_mask = F.interpolate(masks, scale_factor=0.125, mode='bilinear',
+                                               align_corners=False)
+                for i, mask in enumerate(masks):
+                    orig_mask = mask.clone()
+                    if torch.rand(1) > 0.2:
+                        mask = shirnk_mask[i]
+                        _, mask_height, mask_width = mask.size()
+                        new_mask = torch.zeros_like(mask[0])
+                        finds_y, finds_x = torch.nonzero(mask[0] == 1, as_tuple=True)
+                        if len(finds_y) == 0:
+                            continue
+                        x1 = torch.min(finds_x)
+                        x2 = torch.max(finds_x)
+                        y1 = torch.min(finds_y)
+                        y2 = torch.max(finds_y)
+                        if x2 - x1 == 0 or y2 - y1 == 0:
+                            continue
+                        width = x2 - x1
+                        height = y2 - y1
+                        rand1 = torch.rand(1)
+                        rand2 = torch.rand(1)
+                        rand3 = torch.randn(1) + 1
+                        rand4 = torch.randn(1) + 1
+                        rand5 = torch.rand(1)
+                        rand6 = torch.rand(1) - 0.2
 
-            # augs to mask
-            masks = dataset_dict['instances'].gt_masks.float()[None, :]
-            shirnk_mask = F.interpolate(masks, scale_factor=0.125, mode='bilinear',
-                                           align_corners=False)
-            for i, mask in enumerate(masks):
-                orig_mask = mask.clone()
-                if torch.rand(1) > 0.2:
-                    mask = shirnk_mask[i]
-                    _, mask_height, mask_width = mask.size()
-                    new_mask = torch.zeros_like(mask[0])
-                    finds_y, finds_x = torch.nonzero(mask[0] == 1, as_tuple=True)
-                    if len(finds_y) == 0:
-                        continue
-                    x1 = torch.min(finds_x)
-                    x2 = torch.max(finds_x)
-                    y1 = torch.min(finds_y)
-                    y2 = torch.max(finds_y)
-                    if x2 - x1 == 0 or y2 - y1 == 0:
-                        continue
-                    width = x2 - x1
-                    height = y2 - y1
-                    rand1 = torch.rand(1)
-                    rand2 = torch.rand(1)
-                    rand3 = torch.randn(1) + 1
-                    rand4 = torch.randn(1) + 1
-                    rand5 = torch.rand(1)
-                    rand6 = torch.rand(1) - 0.2
+                        finds_y = (torch.rand(finds_y.size()) - 0.5 * rand3) \
+                                  * height * rand1 * 0.2 + finds_y.float()
+                        finds_x = (torch.rand(finds_x.size()) - 0.5 * rand4) \
+                                  * width * rand2 * 0.2 + finds_x.float()
 
-                    finds_y = (torch.rand(finds_y.size()) - 0.5 * rand3) \
-                              * height * rand1 * 0.2 + finds_y.float()
-                    finds_x = (torch.rand(finds_x.size()) - 0.5 * rand4) \
-                              * width * rand2 * 0.2 + finds_x.float()
+                        finds_y[finds_y > mask_height - 1] = mask_height - 1
+                        finds_x[finds_x > mask_width - 1] = mask_width - 1
 
-                    finds_y[finds_y > mask_height - 1] = mask_height - 1
-                    finds_x[finds_x > mask_width - 1] = mask_width - 1
+                        new_mask[finds_y.long(), finds_x.long()] = 1
+                        new_mask += 0.2 * rand5 * mask[0]
+                        scale_factor = 0.25
+                        if torch.rand(1) > 0.5:
+                            scale_factor *= 2
 
-                    new_mask[finds_y.long(), finds_x.long()] = 1
-                    new_mask += 0.2 * rand5 * mask[0]
-                    scale_factor = 0.25
+                        shirnk = F.interpolate(new_mask[None, None, :], scale_factor=scale_factor, mode='bilinear',
+                                               align_corners=False)
+                        expand = F.interpolate(shirnk, orig_mask.size()[-2:], mode='bilinear', align_corners=False)
+                        new_mask = expand[0, 0] + 0.2 * rand6 * orig_mask
+                        new_mask = (new_mask > 0.5).float()
+                        if new_mask.sum() < 64:
+                            new_mask = orig_mask
+                        mask = new_mask
+
                     if torch.rand(1) > 0.5:
-                        scale_factor *= 2
+                        shirnk = F.interpolate(mask[None, :], scale_factor=0.125, mode='bilinear', align_corners=False)
+                        expand = F.interpolate(shirnk, orig_mask.size()[-2:], mode='bilinear', align_corners=False)
+                        if expand.sum() < 64:
+                            expand = orig_mask
+                        mask = (expand[0] > 0.5).float()
 
-                    shirnk = F.interpolate(new_mask[None, None, :], scale_factor=scale_factor, mode='bilinear',
-                                           align_corners=False)
-                    expand = F.interpolate(shirnk, orig_mask.size()[-2:], mode='bilinear', align_corners=False)
-                    new_mask = expand[0, 0] + 0.2 * rand6 * orig_mask
-                    new_mask = (new_mask > 0.5).float()
-                    if new_mask.sum() < 64:
-                        new_mask = orig_mask
-                    mask = new_mask
+                    masks[i] = mask
 
-                if torch.rand(1) > 0.5:
-                    shirnk = F.interpolate(mask[None, :], scale_factor=0.125, mode='bilinear', align_corners=False)
-                    expand = F.interpolate(shirnk, orig_mask.size()[-2:], mode='bilinear', align_corners=False)
-                    if expand.sum() < 64:
-                        expand = orig_mask
-                    mask = (expand[0] > 0.5).float()
+                dataset_dict["instances"].gt_masks = masks[0]
 
-                masks[i] = mask
-
-            dataset_dict["instances"].gt_masks = masks[0]
-
-            # f, axarr = plt.subplots(2, 2)
-            # axarr[0, 0].imshow(orig_mask[0].to('cpu'))
-            # axarr[0, 1].imshow(dataset_dict["instances"].gt_masks[0].to('cpu'))
-            # axarr[1, 1].imshow(dataset_dict['image'].permute(1,2,0))
-            # print()
+                # f, axarr = plt.subplots(2, 2)
+                # axarr[0, 0].imshow(orig_mask[0].to('cpu'))
+                # axarr[0, 1].imshow(dataset_dict["instances"].gt_masks[0].to('cpu'))
+                # axarr[1, 1].imshow(dataset_dict['image'].permute(1,2,0))
+                # print()
 
         return dataset_dict

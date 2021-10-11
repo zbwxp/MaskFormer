@@ -16,7 +16,7 @@ import torch
 import detectron2.utils.comm as comm
 from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.config import get_cfg
-from detectron2.data import MetadataCatalog, build_detection_train_loader
+from detectron2.data import MetadataCatalog, build_detection_train_loader, build_detection_test_loader
 from detectron2.engine import DefaultTrainer, default_argument_parser, default_setup, launch
 from detectron2.evaluation import (
     CityscapesInstanceEvaluator,
@@ -30,6 +30,10 @@ from detectron2.evaluation import (
 from detectron2.projects.deeplab import add_deeplab_config, build_lr_scheduler
 from detectron2.solver.build import maybe_add_gradient_clipping
 from detectron2.utils.logger import setup_logger
+# for test_loader
+from detectron2.data.common import DatasetFromList, MapDataset
+from detectron2.data.samplers import InferenceSampler
+from detectron2.data.build import trivial_batch_collator, get_detection_dataset_dicts
 
 # MaskFormer
 from mask_former import (
@@ -42,6 +46,38 @@ from mask_former import (
     MaskFormerCCLAnnoDatasetMapper,
 )
 from evaluation import ClsEvaluator
+
+def build_classification_test_loader(cfg, dataset_name, sampler=None, num_workers=0):
+    mapper = MaskFormerCCLAnnoDatasetMapper(cfg, False)
+    num_workers = cfg.DATALOADER.NUM_WORKERS
+    if isinstance(dataset_name, str):
+        dataset_name = [dataset_name]
+
+    dataset = get_detection_dataset_dicts(
+        dataset_name,
+        filter_empty=False,
+        proposal_files=[
+            cfg.DATASETS.PROPOSAL_FILES_TEST[list(cfg.DATASETS.TEST).index(x)] for x in dataset_name
+        ]
+        if cfg.MODEL.LOAD_PROPOSALS
+        else None,
+    )
+    if isinstance(dataset, list):
+        dataset = DatasetFromList(dataset, copy=False)
+    if mapper is not None:
+        dataset = MapDataset(dataset, mapper)
+    if sampler is None:
+        sampler = InferenceSampler(len(dataset))
+    # Always use 1 image per worker during inference since this is the
+    # standard when reporting inference time in papers.
+    batch_sampler = torch.utils.data.sampler.BatchSampler(sampler, 1, drop_last=False)
+    data_loader = torch.utils.data.DataLoader(
+        dataset,
+        num_workers=num_workers,
+        batch_sampler=batch_sampler,
+        collate_fn=trivial_batch_collator,
+    )
+    return data_loader
 
 
 class Trainer(DefaultTrainer):
@@ -130,6 +166,15 @@ class Trainer(DefaultTrainer):
             mapper = None
         return build_detection_train_loader(cfg, mapper=mapper)
 
+
+
+
+    @classmethod
+    def build_test_loader(cls, cfg, dataset_name):
+        if 'ccl' in dataset_name:
+            return build_classification_test_loader(cfg, dataset_name)
+        else:
+            return build_detection_test_loader(cfg, dataset_name)
     @classmethod
     def build_lr_scheduler(cls, cfg, optimizer):
         """
