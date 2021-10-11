@@ -105,7 +105,7 @@ class ClsEvaluator(DatasetEvaluator):
         topk = 1
         target = []
         pred = []
-        for p in self._predictions:
+        for p in predictions:
             target.append(p['gt'])
             pred.append(p['pred'])
         pred = torch.stack(pred, dim=0)
