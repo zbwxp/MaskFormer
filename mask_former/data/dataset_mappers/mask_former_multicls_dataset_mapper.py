@@ -252,10 +252,10 @@ class MaskFormerMultiClsDatasetMapper:
 
                 dataset_dict["instances"].gt_masks = masks[0]
 
-                f, axarr = plt.subplots(2, 2)
-                axarr[0, 0].imshow(orig_mask[0].to('cpu'))
-                axarr[0, 1].imshow(dataset_dict["instances"].gt_masks[0].to('cpu'))
-                axarr[1, 1].imshow(dataset_dict['image'].permute(1,2,0))
-                print()
+                # f, axarr = plt.subplots(2, 2)
+                # axarr[0, 0].imshow(orig_mask[0].to('cpu'))
+                # axarr[0, 1].imshow(dataset_dict["instances"].gt_masks[0].to('cpu'))
+                # axarr[1, 1].imshow(dataset_dict['image'].permute(1,2,0))
+                # print()
 
         return dataset_dict
