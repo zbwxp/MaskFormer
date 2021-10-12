@@ -13,7 +13,7 @@ from .data.dataset_mappers.mask_former_panoptic_dataset_mapper import (
 from .data.dataset_mappers.mask_former_semantic_dataset_mapper import (
     MaskFormerSemanticDatasetMapper,
 )
-from .data.dataset_mappers.mask_former_multiscale_dataset_mapper import (
+from .data.dataset_mappers.mask_former_multicls_dataset_mapper import (
     MaskFormerMultiClsDatasetMapper,
 )
 from .data.dataset_mappers.mask_former_ccl_anno_dataset_mapper import (
