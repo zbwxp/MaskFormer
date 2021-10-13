@@ -60,26 +60,36 @@ class MaskFormerSemanticDatasetMapper:
 
     @classmethod
     def from_config(cls, cfg, is_train=True):
-        # Build augmentation
-        augs = [
-            T.ResizeShortestEdge(
-                cfg.INPUT.MIN_SIZE_TRAIN,
-                cfg.INPUT.MAX_SIZE_TRAIN,
-                cfg.INPUT.MIN_SIZE_TRAIN_SAMPLING,
-            )
-        ]
-        if cfg.INPUT.CROP.ENABLED:
-            augs.append(
-                T.RandomCrop_CategoryAreaConstraint(
-                    cfg.INPUT.CROP.TYPE,
-                    cfg.INPUT.CROP.SIZE,
-                    cfg.INPUT.CROP.SINGLE_CATEGORY_MAX_AREA,
-                    cfg.MODEL.SEM_SEG_HEAD.IGNORE_VALUE,
+        if is_train:
+            # Build augmentation
+            augs = [
+                T.ResizeShortestEdge(
+                    cfg.INPUT.MIN_SIZE_TRAIN,
+                    cfg.INPUT.MAX_SIZE_TRAIN,
+                    cfg.INPUT.MIN_SIZE_TRAIN_SAMPLING,
                 )
-            )
-        if cfg.INPUT.COLOR_AUG_SSD:
-            augs.append(ColorAugSSDTransform(img_format=cfg.INPUT.FORMAT))
-        augs.append(T.RandomFlip())
+            ]
+
+            if cfg.INPUT.CROP.ENABLED:
+                augs.append(
+                    T.RandomCrop_CategoryAreaConstraint(
+                        cfg.INPUT.CROP.TYPE,
+                        cfg.INPUT.CROP.SIZE,
+                        cfg.INPUT.CROP.SINGLE_CATEGORY_MAX_AREA,
+                        cfg.MODEL.SEM_SEG_HEAD.IGNORE_VALUE,
+                    )
+                )
+            if cfg.INPUT.COLOR_AUG_SSD:
+                augs.append(ColorAugSSDTransform(img_format=cfg.INPUT.FORMAT))
+            augs.append(T.RandomFlip())
+        else:
+            augs = [
+                T.ResizeShortestEdge(
+                    cfg.INPUT.MIN_SIZE_TEST,
+                    cfg.INPUT.MAX_SIZE_TEST,
+                    cfg.INPUT.MIN_SIZE_TRAIN_SAMPLING,
+                )
+            ]
 
         # Assume always applies to the training set.
         dataset_names = cfg.DATASETS.TRAIN
@@ -103,7 +113,7 @@ class MaskFormerSemanticDatasetMapper:
         Returns:
             dict: a format that builtin models in detectron2 accept
         """
-        assert self.is_train, "MaskFormerSemanticDatasetMapper should only be used for training!"
+        # assert self.is_train, "MaskFormerSemanticDatasetMapper should only be used for training!"
 
         dataset_dict = copy.deepcopy(dataset_dict)  # it will be modified by code below
         image = utils.read_image(dataset_dict["file_name"], format=self.img_format)
@@ -172,6 +182,7 @@ class MaskFormerSemanticDatasetMapper:
 
             if len(masks) == 0:
                 # Some image does not have annotation (all ignored)
+                return None
                 instances.gt_masks = torch.zeros((0, sem_seg_gt.shape[-2], sem_seg_gt.shape[-1]))
             else:
                 masks = BitMasks(

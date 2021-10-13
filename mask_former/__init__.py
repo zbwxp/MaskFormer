@@ -22,4 +22,5 @@ from .data.dataset_mappers.mask_former_ccl_anno_dataset_mapper import (
 # models
 from .mask_former_model import MaskFormer
 from .masked_classification import MaskedClassification
+from .masked_classification_v2 import MaskedClassification_v2
 from .test_time_augmentation import SemanticSegmentorWithTTA

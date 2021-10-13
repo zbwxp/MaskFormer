@@ -48,7 +48,10 @@ from mask_former import (
 from evaluation import ClsEvaluator
 
 def build_classification_test_loader(cfg, dataset_name, sampler=None, num_workers=0):
-    mapper = MaskFormerCCLAnnoDatasetMapper(cfg, False)
+    if 'ccl' in dataset_name:
+        mapper = MaskFormerCCLAnnoDatasetMapper(cfg, False)
+    else:
+        mapper = MaskFormerSemanticDatasetMapper(cfg, False)
     num_workers = cfg.DATALOADER.NUM_WORKERS
     if isinstance(dataset_name, str):
         dataset_name = [dataset_name]
@@ -98,6 +101,13 @@ class Trainer(DefaultTrainer):
             output_folder = os.path.join(cfg.OUTPUT_DIR, "inference")
         evaluator_list = []
         evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
+        if 'MaskedClassification_v2' in cfg.MODEL.META_ARCHITECTURE:
+            evaluator_list=[
+                ClsEvaluator(
+                    dataset_name,
+                    distributed=True,
+                ),]
+            return DatasetEvaluators(evaluator_list)
         if cfg.MODEL.MASK_FORMER.DEFORMABLE_PREDICTOR:
             evaluator_type = "sem_seg"
         if evaluator_type in ["classification"]:
@@ -172,6 +182,8 @@ class Trainer(DefaultTrainer):
     @classmethod
     def build_test_loader(cls, cfg, dataset_name):
         if 'ccl' in dataset_name:
+            return build_classification_test_loader(cfg, dataset_name)
+        elif 'MaskedClassification_v2' in cfg.MODEL.META_ARCHITECTURE:
             return build_classification_test_loader(cfg, dataset_name)
         else:
             return build_detection_test_loader(cfg, dataset_name)
@@ -306,6 +318,12 @@ def main(args):
         DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
             cfg.MODEL.WEIGHTS, resume=args.resume
         )
+        if hasattr(model, 'masked_classifier'):
+            DetectionCheckpointer(model.masked_classifier, save_dir=cfg.OUTPUT_DIR).resume_or_load(
+                '/media/bz/D/美团/MaskFormer/pretrain/R50_ccl_anno/model_final_2241881.pth',
+                resume=args.resume
+            )
+
         res = Trainer.test(cfg, model)
         if cfg.TEST.AUG.ENABLED:
             res.update(Trainer.test_with_TTA(cfg, model))

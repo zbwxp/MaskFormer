@@ -65,8 +65,8 @@ class ClsEvaluator(DatasetEvaluator):
 
         self._metadata = MetadataCatalog.get(dataset_name)
 
-        json_file = PathManager.get_local_path(self._metadata.json_file)
-        self._gt = json.load(open(json_file))
+        # json_file = PathManager.get_local_path(self._metadata.json_file)
+        # self._gt = json.load(open(json_file))
 
     def reset(self):
         self._predictions = []
@@ -83,8 +83,9 @@ class ClsEvaluator(DatasetEvaluator):
         for input, output in zip(inputs, outputs):
             # prediction = {"image_id": input["image_id"]}
             prediction = {}
-            prediction["gt"] = input["category"]
+            prediction["gt"] = input["instances"].gt_classes
             prediction["pred"] = output["pred_classes"].to(self._cpu_device)
+            assert prediction["gt"].numel() == prediction["pred"].numel()
             self._predictions.append(prediction)
 
     def evaluate(self):
@@ -106,10 +107,11 @@ class ClsEvaluator(DatasetEvaluator):
         target = []
         pred = []
         for p in predictions:
-            target.append(p['gt'])
-            pred.append(p['pred'])
-        pred = torch.stack(pred, dim=0)
-        target = torch.as_tensor(target, dtype=pred.dtype)
+            target.append(p['gt'].reshape(-1))
+            pred.append(p['pred'].reshape(-1))
+
+        pred = torch.cat(pred)
+        target = torch.cat(target)
         categories, counts = target.unique(return_counts=True)
         match =pred.eq(target)
         per_cate_acc = []

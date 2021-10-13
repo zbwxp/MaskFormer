@@ -628,7 +628,7 @@ def build_resnet_classification_backbone(cfg, input_shape):
 
     # fmt: off
     freeze_at           = cfg.MODEL.BACKBONE.FREEZE_AT
-    out_features        = cfg.MODEL.RESNETS.OUT_FEATURES
+    out_features        = None
     depth               = cfg.MODEL.RESNETS.DEPTH
     num_groups          = cfg.MODEL.RESNETS.NUM_GROUPS
     width_per_group     = cfg.MODEL.RESNETS.WIDTH_PER_GROUP
