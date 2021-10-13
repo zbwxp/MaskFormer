@@ -177,13 +177,23 @@ class MaskFormerSemanticDatasetMapper:
             instances.gt_classes = torch.tensor(classes, dtype=torch.int64)
 
             masks = []
+            areas = []
             for class_id in classes:
-                masks.append(sem_seg_gt == class_id)
+                mask = sem_seg_gt == class_id
+                areas.append(mask.sum())
+                masks.append(mask)
+            if self.is_train:
+                areas = np.array(areas)
+                keep = areas > 16
+                # filter too small instances
+                if False in keep:
+                    instances = instances[keep]
+                    masks = np.array(masks)[keep]
 
             if len(masks) == 0:
                 # Some image does not have annotation (all ignored)
                 return None
-                instances.gt_masks = torch.zeros((0, sem_seg_gt.shape[-2], sem_seg_gt.shape[-1]))
+                # instances.gt_masks = torch.zeros((0, sem_seg_gt.shape[-2], sem_seg_gt.shape[-1]))
             else:
                 masks = BitMasks(
                     torch.stack([torch.from_numpy(np.ascontiguousarray(x.copy())) for x in masks])
