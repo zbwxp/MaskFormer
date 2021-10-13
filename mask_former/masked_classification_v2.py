@@ -22,7 +22,6 @@ from detectron2.layers import Conv2d, ShapeSpec, get_norm
 from typing import Callable, Dict, List, Optional, Tuple, Union
 import fvcore.nn.weight_init as weight_init
 from .modeling.transformer.transformer_predictor import MLP
-import clip
 from PIL import Image
 import json
 
