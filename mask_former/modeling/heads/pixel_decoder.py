@@ -178,9 +178,10 @@ class ClsDecoder(nn.Module):
         # output_convs = []
 
         use_bias = norm == ""
+        conv_dims = [32, 64, 128, 256]
         for idx, in_channels in enumerate(feature_channels):
+            conv_dim = conv_dims[idx]
             lateral_norm = get_norm(norm, conv_dim)
-
             lateral_conv = Conv2d(
                 in_channels, conv_dim, kernel_size=1, bias=use_bias, norm=lateral_norm
             )

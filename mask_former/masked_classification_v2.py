@@ -24,7 +24,7 @@ import fvcore.nn.weight_init as weight_init
 from .modeling.transformer.transformer_predictor import MLP
 from PIL import Image
 import json
-
+from .modeling.backbone.resnet_v1c import *
 
 @META_ARCH_REGISTRY.register()
 class MaskedClassification_v2(nn.Module):
@@ -103,13 +103,14 @@ class MaskedClassification_v2(nn.Module):
         self._warmup_iters = 4000
 
         self.pool = nn.AdaptiveAvgPool2d(1)
-        self.classifier = MLP(1024, 1024, num_classes, 3)
+        self.classifier = MLP(480, 256, num_classes, 3)
 
 
 
     @classmethod
     def from_config(cls, cfg):
-        backbone = build_backbone(cfg)
+        input_shape = ShapeSpec(channels=len(cfg.MODEL.PIXEL_MEAN))
+        backbone = build_resnetv1c_backbone(cfg, input_shape)
         sem_seg_head = build_sem_seg_head(cfg, backbone.output_shape())
 
         # Loss parameters:
@@ -254,7 +255,7 @@ class MaskedClassification_v2(nn.Module):
             per_img_masks = F.interpolate(per_img_masks[None, :], size=(h, w), mode='nearest')[0]
             per_img_features = outputs[i]
             masked_map = torch.einsum("qhw,chw->qchw", per_img_masks, per_img_features)
-            masked_map = F.max_pool2d(masked_map, kernel_size=7, stride=4, padding=1)
+            masked_map = F.interpolate(masked_map, scale_factor=0.125, mode='nearest')
             map_weights = (masked_map.sum(dim=1) > 0).flatten(-2).sum(dim=-1)
             s_h, s_w = masked_map.size()[-2:]
             area = s_h * s_w

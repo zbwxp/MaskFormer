@@ -1,10 +1,10 @@
 _BASE_: Base-ADE20K-150.yaml
 MODEL:
   BACKBONE:
-    NAME: "build_resnet_backbone"
-    FREEZE_AT: 0
+    NAME: "build_resnet_v1c_backbone"
+    FREEZE_AT: 5
   RESNETS:
-    NORM: "SyncBN"
+    NORM: "BN"
   META_ARCHITECTURE: "MaskedClassification_v2"
   SEM_SEG_HEAD:
     PIXEL_DECODER_NAME: "ClsDecoder"
@@ -39,10 +39,10 @@ INPUT:
   SIZE_DIVISIBILITY: -1
 
 SOLVER:
-  IMS_PER_BATCH: 16
+  IMS_PER_BATCH: 256
   BASE_LR: 0.01
 #  STEPS: (50000,100000)
-  MAX_ITER: 160000 # 165k annotations
+  MAX_ITER: 15000 # 165k annotations
   WARMUP_FACTOR: 0.01
   WARMUP_ITERS: 1000
   WEIGHT_DECAY: 0.0001
