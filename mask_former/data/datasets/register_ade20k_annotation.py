@@ -34,6 +34,12 @@ def load_ccl_anno_ade20k(json_path, gt_ext="png", image_ext="jpg"):
 
     return dataset_dicts
 
+def load_ccl_ade20k(json_path, gt_ext="png", image_ext="jpg"):
+    with open(json_path, 'r') as f:
+        annos = json.load(f)
+
+    return annos
+
 
 def register_anno_ade20k(root):
     root = os.path.join(root, "ADEChallengeData2016")
@@ -75,8 +81,27 @@ def register_ccl_anno_ade20k(root):
             json_file=json_path,
         )
 
-
+def register_ccl_ade20k(root):
+    root = os.path.join(root, "ADEChallengeData2016")
+    for name, dirname in [("train", "training"), ("val", "validation")]:
+        image_dir = os.path.join(root, "images", dirname)
+        gt_dir = os.path.join(root, "annotations_detectron2", dirname)
+        json_dir = os.path.join(root, "annotations_detectron2")
+        json_path = os.path.join(json_dir, f"ade20k_{name}_ccl.json")
+        name = f"ade20k_ccl_{name}"
+        DatasetCatalog.register(
+            name, lambda x=json_path: load_ccl_ade20k(x, gt_ext="png", image_ext="jpg")
+        )
+        MetadataCatalog.get(name).set(
+            stuff_classes=ADE20K_SEM_SEG_CATEGORIES[:],
+            image_root=image_dir,
+            sem_seg_root=gt_dir,
+            evaluator_type="classification",
+            ignore_label=255,
+            json_file=json_path,
+        )
 
 _root = os.getenv("DETECTRON2_DATASETS", "datasets")
 register_anno_ade20k(_root)
 register_ccl_anno_ade20k(_root)
+register_ccl_ade20k(_root)
