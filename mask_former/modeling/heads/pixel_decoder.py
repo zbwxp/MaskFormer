@@ -12,7 +12,7 @@ from detectron2.modeling import SEM_SEG_HEADS_REGISTRY
 
 from ..transformer.position_encoding import PositionEmbeddingSine
 from ..transformer.transformer import TransformerEncoder, TransformerEncoderLayer
-
+import torch
 
 def build_pixel_decoder(cfg, input_shape):
     """
@@ -127,6 +127,7 @@ class BasePixelDecoder(nn.Module):
         return ret
 
     def forward_features(self, features):
+        maps = []
         # Reverse feature maps into top-down order (from low to high resolution)
         for idx, f in enumerate(self.in_features[::-1]):
             x = features[f]
@@ -134,12 +135,15 @@ class BasePixelDecoder(nn.Module):
             output_conv = self.output_convs[idx]
             if lateral_conv is None:
                 y = output_conv(x)
+                maps.append(F.interpolate(y, size=features["res2"].size()[-2:], mode='nearest'))
             else:
                 cur_fpn = lateral_conv(x)
+                maps.append(F.interpolate(cur_fpn, size=features["res2"].size()[-2:], mode='nearest'))
                 # Following FPN implementation, we use nearest upsampling here
                 y = cur_fpn + F.interpolate(y, size=cur_fpn.shape[-2:], mode="nearest")
                 y = output_conv(y)
-        return self.mask_features(y), None
+        maps = torch.cat(maps, dim=1)
+        return self.mask_features(y), None, maps
 
     def forward(self, features, targets=None):
         logger = logging.getLogger(__name__)
