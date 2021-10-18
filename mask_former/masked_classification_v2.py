@@ -57,6 +57,7 @@ class MaskedClassification_v2(nn.Module):
             use_pred_loss: bool,
             iter_matcher: bool,
             iter_loss: bool,
+            pixel_decoder_name: str,
     ):
         """
         Args:
@@ -103,7 +104,10 @@ class MaskedClassification_v2(nn.Module):
         self._warmup_iters = 4000
 
         self.pool = nn.AdaptiveAvgPool2d(1)
-        self.classifier = MLP(1024, 1024, num_classes, 3)
+        if pixel_decoder_name =="ClsDecoder_light":
+            self.classifier = MLP(480, 256, num_classes, 3)
+        else:
+            self.classifier = MLP(1024, 1024, num_classes, 3)
 
 
 
@@ -194,6 +198,7 @@ class MaskedClassification_v2(nn.Module):
             "use_pred_loss": cfg.MODEL.MASK_FORMER.USE_PRED_LOSS,
             "iter_matcher": cfg.MODEL.MASK_FORMER.ITER_MATCHER,
             "iter_loss": cfg.MODEL.MASK_FORMER.ITER_LOSS,
+            "pixel_decoder_name": cfg.MODEL.SEM_SEG_HEAD.PIXEL_DECODER_NAME,
         }
 
     @property
