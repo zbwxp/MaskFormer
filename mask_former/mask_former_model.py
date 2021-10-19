@@ -193,6 +193,9 @@ class MaskFormer(nn.Module):
             for i, target in enumerate(targets):
                 per_img_masks = target['aug_masks']
                 h, w = maps.size()[-2:]
+                if per_img_masks.size()[0] == 0:
+                    print("no mask in this img")
+                    continue
                 per_img_masks = F.interpolate(per_img_masks[None, :], size=(h, w), mode='nearest')[0]
                 per_img_features = maps[i]
                 masked_map = torch.einsum("qhw,chw->qchw", per_img_masks, per_img_features)
