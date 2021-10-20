@@ -108,7 +108,7 @@ class MaskFormerHead(nn.Module):
         return self.layers(features)
 
     def layers(self, features):
-        mask_features, transformer_encoder_features = self.pixel_decoder.forward_features(features)
+        mask_features, transformer_encoder_features, _ = self.pixel_decoder.forward_features(features)
         if self.transformer_in_feature == "transformer_encoder":
             assert (
                 transformer_encoder_features is not None
@@ -116,4 +116,5 @@ class MaskFormerHead(nn.Module):
             predictions = self.predictor(transformer_encoder_features, mask_features)
         else:
             predictions = self.predictor(features[self.transformer_in_feature], mask_features)
+        predictions.update({"mask_features": mask_features})
         return predictions

@@ -80,7 +80,8 @@ class MaskFormer(nn.Module):
         self.register_buffer("pixel_std", torch.Tensor(pixel_std).view(-1, 1, 1), False)
 
         self.pool = nn.AdaptiveAvgPool2d(1)
-        self.classifier = MLP(1024, 1024, num_classes, 3)
+        # self.classifier = MLP(1024, 1024, num_classes, 3)
+        self.classifier = MLP(256, 256, num_classes, 3)
         self.criterion.weight_dict.update({"loss_individual_cls": 1.0})
 
     @classmethod
@@ -189,7 +190,8 @@ class MaskFormer(nn.Module):
             # individual cls branck
             masked_pool_vec = []
             masked_pool_weights = []
-            maps = outputs['multi_level_feature_maps']
+            # maps = outputs['multi_level_feature_maps']
+            maps = outputs['mask_features']
             for i, target in enumerate(targets):
                 per_img_masks = target['aug_masks']
                 h, w = maps.size()[-2:]
