@@ -77,6 +77,13 @@ class MaskFormer(nn.Module):
         self.register_buffer("pixel_mean", torch.Tensor(pixel_mean).view(-1, 1, 1), False)
         self.register_buffer("pixel_std", torch.Tensor(pixel_std).view(-1, 1, 1), False)
 
+        self.criterion.weight_dict.update({"loss_level_0": 1})
+        self.criterion.weight_dict.update({"loss_level_1": 1})
+        self.criterion.weight_dict.update({"loss_level_2": 1})
+        self.criterion.weight_dict.update({"loss_level_3": 1})
+        self.criterion.weight_dict.update({"loss_level_4": 1})
+        self.criterion.weight_dict.update({"loss_level_5": 1})
+
     @classmethod
     def from_config(cls, cfg):
         backbone = build_backbone(cfg)
@@ -176,8 +183,27 @@ class MaskFormer(nn.Module):
             else:
                 targets = None
 
+            sem_seg_gts = [x["sem_seg"].to(self.device) for x in batched_inputs]
+            sem_seg_gts = ImageList.from_tensors(sem_seg_gts, self.size_divisibility).tensor
+
+            mask_cls = F.softmax(outputs["pred_logits"], dim=-1)[..., :-1]
+            mask_pred = outputs["pred_masks"].sigmoid()
+            semseg = torch.einsum("bqc,bqhw->bchw", mask_cls, mask_pred)
+            semseg = F.interpolate(semseg, size=sem_seg_gts.size()[-2:], mode='bilinear', align_corners=False)
+
+            losses = {}
+            loss = F.cross_entropy(semseg, sem_seg_gts, ignore_index=255, reduction='mean')
+            losses.update({"loss_level_5": loss})
+            if "aux_outputs" in outputs:
+                for i, aux_outputs in enumerate(outputs["aux_outputs"]):
+                    mask_cls = F.softmax(aux_outputs["pred_logits"], dim=-1)[..., :-1]
+                    mask_pred = aux_outputs["pred_masks"].sigmoid()
+                    semseg = torch.einsum("bqc,bqhw->bchw", mask_cls, mask_pred)
+                    semseg = F.interpolate(semseg, size=sem_seg_gts.size()[-2:], mode='bilinear', align_corners=False)
+                    loss = F.cross_entropy(semseg, sem_seg_gts, ignore_index=255, reduction='mean')
+                    losses.update({"loss_level"+f"_{i}": loss})
             # bipartite matching-based loss
-            losses = self.criterion(outputs, targets)
+            # losses = self.criterion(outputs, targets)
 
             for k in list(losses.keys()):
                 if k in self.criterion.weight_dict:
