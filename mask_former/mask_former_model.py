@@ -40,6 +40,7 @@ class MaskFormer(nn.Module):
         pixel_mean: Tuple[float],
         pixel_std: Tuple[float],
         num_classes: int,
+        cls_test: bool
     ):
         """
         Args:
@@ -80,9 +81,16 @@ class MaskFormer(nn.Module):
         self.register_buffer("pixel_std", torch.Tensor(pixel_std).view(-1, 1, 1), False)
 
         self.pool = nn.AdaptiveAvgPool2d(1)
-        # self.classifier = MLP(1024, 1024, num_classes, 3)
-        self.classifier = MLP(256, 256, num_classes, 3)
+        self.classifier = MLP(1024, 1024, num_classes, 3)
+        # self.classifier = MLP(256, 256, num_classes, 3)
         self.criterion.weight_dict.update({"loss_individual_cls": 1.0})
+        self.cls_test = cls_test
+
+        self.matcher = HungarianMatcher(
+            cost_class=1,
+            cost_mask=20.0,
+            cost_dice=1.0,
+        )
 
     @classmethod
     def from_config(cls, cfg):
@@ -137,6 +145,7 @@ class MaskFormer(nn.Module):
             "pixel_mean": cfg.MODEL.PIXEL_MEAN,
             "pixel_std": cfg.MODEL.PIXEL_STD,
             "num_classes": cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES,
+            "cls_test": cfg.MODEL.MASK_FORMER.TEST.CLASSIFICATION,
         }
 
     @property
@@ -176,41 +185,23 @@ class MaskFormer(nn.Module):
         features = self.backbone(images.tensor)
         outputs = self.sem_seg_head(features)
 
-        if self.training:
-            # mask classification target
+        # mask classification target
+        if True:
             if "instances" in batched_inputs[0]:
                 gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
                 targets = self.prepare_targets(gt_instances, images)
             else:
                 targets = None
 
+        if self.training:
+
             # bipartite matching-based loss
             losses = self.criterion(outputs, targets)
 
             # individual cls branck
-            masked_pool_vec = []
-            masked_pool_weights = []
-            # maps = outputs['multi_level_feature_maps']
-            maps = outputs['mask_features']
-            for i, target in enumerate(targets):
-                per_img_masks = target['aug_masks']
-                h, w = maps.size()[-2:]
-                if per_img_masks.size()[0] == 0:
-                    print("no mask in this img")
-                    continue
-                per_img_masks = F.interpolate(per_img_masks[None, :], size=(h, w), mode='nearest')[0]
-                per_img_features = maps[i]
-                masked_map = torch.einsum("qhw,chw->qchw", per_img_masks, per_img_features)
-                masked_map = F.max_pool2d(masked_map, kernel_size=3, stride=2, padding=1)
-                map_weights = (masked_map.sum(dim=1) > 0).flatten(-2).sum(dim=-1)
-                s_h, s_w = masked_map.size()[-2:]
-                area = s_h * s_w
-                masked_pool = self.pool(masked_map).squeeze() * (area / (map_weights + 1))[:, None]
-                masked_pool_vec.append(masked_pool)
-
-            masked_pool_vec = torch.cat(masked_pool_vec, dim=0).squeeze()
-            pred_logits = self.classifier(masked_pool_vec)
-
+            maps = outputs['multi_level_feature_maps']
+            # maps = outputs['mask_features']
+            pred_logits = self.get_cls_vec(maps, targets)
 
             labels = torch.cat([x['labels'] for x in targets])
             loss_ce = F.cross_entropy(pred_logits, labels)
@@ -227,6 +218,13 @@ class MaskFormer(nn.Module):
         else:
             mask_cls_results = outputs["pred_logits"]
             mask_pred_results = outputs["pred_masks"]
+            maps = outputs['multi_level_feature_maps']
+
+            # if self.cls_test and False:
+            #     pred_logits = self.get_cls_vec(maps, targets)
+            #     pred = {"pred_classes": pred_logits.argmax(-1)}
+            #     return [pred, pred_logits]
+
             # upsample masks
             mask_pred_results = F.interpolate(
                 mask_pred_results,
@@ -236,29 +234,111 @@ class MaskFormer(nn.Module):
             )
 
             processed_results = []
-            for mask_cls_result, mask_pred_result, input_per_image, image_size in zip(
-                mask_cls_results, mask_pred_results, batched_inputs, images.image_sizes
+            for mask_cls_result, mask_pred_result, input_per_image, image_size, map in zip(
+                    mask_cls_results, mask_pred_results, batched_inputs, images.image_sizes, maps
             ):
                 height = input_per_image.get("height", image_size[0])
                 width = input_per_image.get("width", image_size[1])
 
-                if self.sem_seg_postprocess_before_inference:
-                    mask_pred_result = sem_seg_postprocess(
-                        mask_pred_result, image_size, height, width
-                    )
+                if False:
+                    keep = self.filter_masks(mask_pred_result)
+                    mask_pred_result = mask_pred_result[keep]
+
+                    pred_logits = self.get_cls_vec_test(map[None, :],
+                                                   [{"aug_masks": (mask_pred_result > 0.5).float()}])
+                    mask_cls_result = pred_logits
+                # # upsample masks
+                # mask_pred_result = F.interpolate(
+                #     mask_pred_result[None, :],
+                #     size=(images.tensor.shape[-2], images.tensor.shape[-1]),
+                #     mode="bilinear",
+                #     align_corners=False,
+                # )[0]
 
                 # semantic segmentation inference
                 r = self.semantic_inference(mask_cls_result, mask_pred_result)
+                # outputs = {"pred_masks": mask_pred_result[None, :]}
+                # outputs.update({"pred_logits": mask_cls_result[None, :, :-1]})
+                # # outputs.update({"pred_logits": mask_cls_result[None, :, :]})
+                #
+                #
+                # indices = self.matcher(outputs, targets)
+                # indices_orig = list(indices[0])
+                # val, idx = indices_orig[1].sort()
+                # indices_orig[0] = indices_orig[0][idx]
+                # indices_orig[1] = val
+                #
+                # gt_cls_indices = targets[0]["labels"][val]
+                # cls_pred = mask_cls_result[indices_orig[0]][:, :-1].argmax(dim=-1)
+                # # cls_pred = mask_cls_result[indices_orig[0]].argmax(dim=-1)
+                #
+                # r = torch.zeros((150, mask_pred_result.size()[-2], mask_pred_result.size()[-1]),
+                #                      dtype=mask_pred_result.dtype, device=self.device)
+                #
+                # for cls_idx, pred_idx in zip(cls_pred, indices_orig[0]):
+                #     if cls_idx == 150:
+                #         continue
+                #     r[cls_idx] += mask_pred_result[pred_idx].sigmoid()
+
+
                 if not self.sem_seg_postprocess_before_inference:
                     r = sem_seg_postprocess(r, image_size, height, width)
                 processed_results.append({"sem_seg": r})
 
-                # panoptic segmentation inference
-                if self.panoptic_on:
-                    panoptic_r = self.panoptic_inference(mask_cls_result, mask_pred_result)
-                    processed_results[-1]["panoptic_seg"] = panoptic_r
-
             return processed_results
+
+    def filter_masks(self, masks):
+        # argmax thresh
+        argmax_thresh, counts = masks.argmax(dim=0).unique(return_counts=True)
+        # min area thresh
+        q, h, w = masks.size()
+        total_area = h * w
+        thresh_area = counts > total_area * 0.0005
+
+        return argmax_thresh[thresh_area]
+
+    def get_cls_vec(self, maps, targets):
+        masked_pool_vec = []
+        for i, target in enumerate(targets):
+            per_img_masks = target['aug_masks']
+            h, w = maps.size()[-2:]
+            if per_img_masks.size()[0] == 0:
+                print("no mask in this img")
+                continue
+            per_img_masks = F.interpolate(per_img_masks[None, :], size=(h, w), mode='nearest')[0]
+            per_img_features = maps[i]
+            masked_map = torch.einsum("qhw,chw->qchw", per_img_masks, per_img_features)
+            masked_map = F.max_pool2d(masked_map, kernel_size=3, stride=2, padding=1)
+            map_weights = (masked_map.sum(dim=1) > 0).flatten(-2).sum(dim=-1)
+            s_h, s_w = masked_map.size()[-2:]
+            area = s_h * s_w
+            masked_pool = self.pool(masked_map).squeeze() * (area / (map_weights + 1))[:, None]
+            masked_pool_vec.append(masked_pool)
+
+        masked_pool_vec = torch.cat(masked_pool_vec, dim=0).squeeze()
+        pred_logits = self.classifier(masked_pool_vec)
+        return pred_logits
+
+    def get_cls_vec_test(self, maps, targets):
+        masked_pool_vec = []
+        masks = targets[0]['aug_masks']
+        if masks.size()[0] == 0:
+            print("no mask in this img")
+            assert False
+        for i, mask in enumerate(masks):
+            h, w = maps.size()[-2:]
+            per_img_features = maps[0]
+            masked_map = torch.einsum("hw,chw->chw", mask, per_img_features)
+            masked_map = F.max_pool2d(masked_map, kernel_size=3, stride=2, padding=1)
+            map_weights = (masked_map.sum(dim=0) > 0).flatten(-2).sum(dim=-1)
+            s_h, s_w = masked_map.size()[-2:]
+            area = s_h * s_w
+            masked_pool = self.pool(masked_map).squeeze() * (area / (map_weights + 1))
+            masked_pool_vec.append(masked_pool)
+
+        masked_pool_vec = torch.stack(masked_pool_vec, dim=0)
+        pred_logits = self.classifier(masked_pool_vec)
+        return pred_logits
 
     def prepare_targets(self, targets, images):
         h, w = images.tensor.shape[-2:]
@@ -271,82 +351,83 @@ class MaskFormer(nn.Module):
             # apply aug to masks
             shirnk_mask = F.interpolate(aug_masks[None, :], scale_factor=0.125, mode='bilinear',
                                         align_corners=False)[0]
-            # augs
-            for i, mask in enumerate(aug_masks):
-                orig_mask = mask.clone()
-                # random erosion
-                if torch.rand(1) > 0.2:
-                    mask = shirnk_mask[i]
-                    mask_height, mask_width = mask.size()
-                    new_mask = torch.zeros_like(mask)
-                    finds_y, finds_x = torch.nonzero(mask == 1, as_tuple=True)
-                    if len(finds_y) == 0:
-                        continue
-                    x1 = torch.min(finds_x)
-                    x2 = torch.max(finds_x)
-                    y1 = torch.min(finds_y)
-                    y2 = torch.max(finds_y)
-                    if x2 - x1 == 0 or y2 - y1 == 0:
-                        continue
-                    width = x2 - x1
-                    height = y2 - y1
-                    rand1 = torch.rand(1, device=self.device)
-                    rand2 = torch.rand(1, device=self.device)
-                    rand3 = torch.randn(1, device=self.device) + 1
-                    rand4 = torch.randn(1, device=self.device) + 1
-                    rand5 = torch.rand(1, device=self.device)
-                    rand6 = torch.rand(1, device=self.device) - 0.2
+            if self.training:
+                # augs
+                for i, mask in enumerate(aug_masks):
+                    orig_mask = mask.clone()
+                    # random erosion
+                    if torch.rand(1) > 0.2:
+                        mask = shirnk_mask[i]
+                        mask_height, mask_width = mask.size()
+                        new_mask = torch.zeros_like(mask)
+                        finds_y, finds_x = torch.nonzero(mask == 1, as_tuple=True)
+                        if len(finds_y) == 0:
+                            continue
+                        x1 = torch.min(finds_x)
+                        x2 = torch.max(finds_x)
+                        y1 = torch.min(finds_y)
+                        y2 = torch.max(finds_y)
+                        if x2 - x1 == 0 or y2 - y1 == 0:
+                            continue
+                        width = x2 - x1
+                        height = y2 - y1
+                        rand1 = torch.rand(1, device=self.device)
+                        rand2 = torch.rand(1, device=self.device)
+                        rand3 = torch.randn(1, device=self.device) + 1
+                        rand4 = torch.randn(1, device=self.device) + 1
+                        rand5 = torch.rand(1, device=self.device)
+                        rand6 = torch.rand(1, device=self.device) - 0.2
 
-                    finds_y = (torch.rand(finds_y.size(), device=self.device) - 0.5 * rand3) \
-                              * height * rand1 * 0.2 + finds_y.float()
-                    finds_x = (torch.rand(finds_x.size(), device=self.device) - 0.5 * rand4) \
-                              * width * rand2 * 0.2 + finds_x.float()
+                        finds_y = (torch.rand(finds_y.size(), device=self.device) - 0.5 * rand3) \
+                                  * height * rand1 * 0.2 + finds_y.float()
+                        finds_x = (torch.rand(finds_x.size(), device=self.device) - 0.5 * rand4) \
+                                  * width * rand2 * 0.2 + finds_x.float()
 
-                    finds_y[finds_y > mask_height - 1] = mask_height - 1
-                    finds_x[finds_x > mask_width - 1] = mask_width - 1
+                        finds_y[finds_y > mask_height - 1] = mask_height - 1
+                        finds_x[finds_x > mask_width - 1] = mask_width - 1
 
-                    new_mask[finds_y.long(), finds_x.long()] = 1
-                    new_mask += 0.2 * rand5 * mask[0]
-                    scale_factor = 0.25
+                        new_mask[finds_y.long(), finds_x.long()] = 1
+                        new_mask += 0.2 * rand5 * mask[0]
+                        scale_factor = 0.25
+                        if torch.rand(1) > 0.5:
+                            scale_factor *= 2
+
+                        shirnk = F.interpolate(new_mask[None, None, :], scale_factor=scale_factor, mode='bilinear',
+                                               align_corners=False)
+                        expand = F.interpolate(shirnk, orig_mask.size()[-2:], mode='bilinear', align_corners=False)
+                        new_mask = expand[0, 0] + 0.2 * rand6 * orig_mask
+                        new_mask = (new_mask > 0.5).float()
+                        if new_mask.sum() < 64:
+                            continue
+                        mask = new_mask
+
                     if torch.rand(1) > 0.5:
-                        scale_factor *= 2
+                        shirnk = F.interpolate(mask[None, None, :], scale_factor=0.125, mode='bilinear',
+                                               align_corners=False)
+                        expand = F.interpolate(shirnk, orig_mask.size()[-2:], mode='bilinear', align_corners=False)
+                        mask = (expand[0, 0] > 0.5).float()
+                        if mask.sum() < 64:
+                            continue
 
-                    shirnk = F.interpolate(new_mask[None, None, :], scale_factor=scale_factor, mode='bilinear',
-                                           align_corners=False)
-                    expand = F.interpolate(shirnk, orig_mask.size()[-2:], mode='bilinear', align_corners=False)
-                    new_mask = expand[0, 0] + 0.2 * rand6 * orig_mask
-                    new_mask = (new_mask > 0.5).float()
-                    if new_mask.sum() < 64:
-                        continue
-                    mask = new_mask
+                    aug_masks[i] = mask
 
-                if torch.rand(1) > 0.5:
-                    shirnk = F.interpolate(mask[None, None, :], scale_factor=0.125, mode='bilinear',
-                                           align_corners=False)
-                    expand = F.interpolate(shirnk, orig_mask.size()[-2:], mode='bilinear', align_corners=False)
-                    mask = (expand[0, 0] > 0.5).float()
-                    if mask.sum() < 64:
-                        continue
-
-                aug_masks[i] = mask
-
-                # f, axarr = plt.subplots(2, 2)
-                # axarr[0, 0].imshow(orig_mask.to('cpu'))
-                # axarr[0, 1].imshow(gt_masks[i].to('cpu'))
-                # axarr[1, 0].imshow(aug_masks[i].to('cpu'))
-                # print()
+                    # f, axarr = plt.subplots(2, 2)
+                    # axarr[0, 0].imshow(orig_mask.to('cpu'))
+                    # axarr[0, 1].imshow(gt_masks[i].to('cpu'))
+                    # axarr[1, 0].imshow(aug_masks[i].to('cpu'))
+                    # print()
 
             padded_masks = torch.zeros((gt_masks.shape[0], h, w), dtype=gt_masks.dtype, device=gt_masks.device)
             padded_masks[:, : gt_masks.shape[1], : gt_masks.shape[2]] = gt_masks
             padded_aug_masks = torch.zeros((aug_masks.shape[0], h, w), dtype=aug_masks.dtype, device=aug_masks.device)
             padded_aug_masks[:, : aug_masks.shape[1], : aug_masks.shape[2]] = aug_masks
-
-            # elimate too small masks
-            areas = padded_masks.flatten(-2).sum(-1)
-            keep = areas > 16
-            gt_classes = gt_classes[keep]
-            padded_masks = padded_masks[keep]
-            padded_aug_masks = padded_aug_masks[keep]
+            if self.training:
+                # elimate too small masks
+                areas = padded_masks.flatten(-2).sum(-1)
+                keep = areas > 16
+                gt_classes = gt_classes[keep]
+                padded_masks = padded_masks[keep]
+                padded_aug_masks = padded_aug_masks[keep]
 
             new_targets.append(
                 {

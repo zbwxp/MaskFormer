@@ -20,9 +20,7 @@ class MaskFormerSemanticDatasetMapper:
     """
     A callable which takes a dataset dict in Detectron2 Dataset format,
     and map it into a format used by MaskFormer for semantic segmentation.
-
     The callable currently does the following:
-
     1. Read the image from "file_name"
     2. Applies geometric transforms to the image and annotation
     3. Find and applies suitable cropping to the image and annotation
@@ -60,26 +58,36 @@ class MaskFormerSemanticDatasetMapper:
 
     @classmethod
     def from_config(cls, cfg, is_train=True):
-        # Build augmentation
-        augs = [
-            T.ResizeShortestEdge(
-                cfg.INPUT.MIN_SIZE_TRAIN,
-                cfg.INPUT.MAX_SIZE_TRAIN,
-                cfg.INPUT.MIN_SIZE_TRAIN_SAMPLING,
-            )
-        ]
-        if cfg.INPUT.CROP.ENABLED:
-            augs.append(
-                T.RandomCrop_CategoryAreaConstraint(
-                    cfg.INPUT.CROP.TYPE,
-                    cfg.INPUT.CROP.SIZE,
-                    cfg.INPUT.CROP.SINGLE_CATEGORY_MAX_AREA,
-                    cfg.MODEL.SEM_SEG_HEAD.IGNORE_VALUE,
+        if is_train:
+            # Build augmentation
+            augs = [
+                T.ResizeShortestEdge(
+                    cfg.INPUT.MIN_SIZE_TRAIN,
+                    cfg.INPUT.MAX_SIZE_TRAIN,
+                    cfg.INPUT.MIN_SIZE_TRAIN_SAMPLING,
                 )
-            )
-        if cfg.INPUT.COLOR_AUG_SSD:
-            augs.append(ColorAugSSDTransform(img_format=cfg.INPUT.FORMAT))
-        augs.append(T.RandomFlip())
+            ]
+
+            if cfg.INPUT.CROP.ENABLED:
+                augs.append(
+                    T.RandomCrop_CategoryAreaConstraint(
+                        cfg.INPUT.CROP.TYPE,
+                        cfg.INPUT.CROP.SIZE,
+                        cfg.INPUT.CROP.SINGLE_CATEGORY_MAX_AREA,
+                        cfg.MODEL.SEM_SEG_HEAD.IGNORE_VALUE,
+                    )
+                )
+            if cfg.INPUT.COLOR_AUG_SSD:
+                augs.append(ColorAugSSDTransform(img_format=cfg.INPUT.FORMAT))
+            augs.append(T.RandomFlip())
+        else:
+            augs = [
+                T.ResizeShortestEdge(
+                    cfg.INPUT.MIN_SIZE_TEST,
+                    cfg.INPUT.MAX_SIZE_TEST,
+                    cfg.INPUT.MIN_SIZE_TRAIN_SAMPLING,
+                )
+            ]
 
         # Assume always applies to the training set.
         dataset_names = cfg.DATASETS.TRAIN
@@ -99,11 +107,10 @@ class MaskFormerSemanticDatasetMapper:
         """
         Args:
             dataset_dict (dict): Metadata of one image, in Detectron2 Dataset format.
-
         Returns:
             dict: a format that builtin models in detectron2 accept
         """
-        assert self.is_train, "MaskFormerSemanticDatasetMapper should only be used for training!"
+        # assert self.is_train, "MaskFormerSemanticDatasetMapper should only be used for training!"
 
         dataset_dict = copy.deepcopy(dataset_dict)  # it will be modified by code below
         image = utils.read_image(dataset_dict["file_name"], format=self.img_format)
@@ -167,8 +174,18 @@ class MaskFormerSemanticDatasetMapper:
             instances.gt_classes = torch.tensor(classes, dtype=torch.int64)
 
             masks = []
+            areas = []
             for class_id in classes:
-                masks.append(sem_seg_gt == class_id)
+                mask = sem_seg_gt == class_id
+                areas.append(mask.sum())
+                masks.append(mask)
+            if self.is_train:
+                areas = np.array(areas)
+                keep = areas > 16
+                # filter too small instances
+                if False in keep:
+                    instances = instances[keep]
+                    masks = np.array(masks)[keep]
 
             if len(masks) == 0:
                 # Some image does not have annotation (all ignored)
