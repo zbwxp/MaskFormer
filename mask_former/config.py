@@ -54,6 +54,7 @@ def add_mask_former_config(cfg):
     cfg.MODEL.MASK_FORMER.TEST.OBJECT_MASK_THRESHOLD = 0.0
     cfg.MODEL.MASK_FORMER.TEST.OVERLAP_THRESHOLD = 0.0
     cfg.MODEL.MASK_FORMER.TEST.SEM_SEG_POSTPROCESSING_BEFORE_INFERENCE = False
+    cfg.MODEL.MASK_FORMER.TEST.CLASSIFICATION = False
 
     # Sometimes `backbone.size_divisibility` is set to 0 for some backbone (e.g. ResNet)
     # you can use this config to override
