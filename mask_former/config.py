@@ -48,6 +48,8 @@ def add_mask_former_config(cfg):
     cfg.MODEL.MASK_FORMER.TRANSFORMER_IN_FEATURE = "res5"
     cfg.MODEL.MASK_FORMER.ENFORCE_INPUT_PROJ = False
     cfg.MODEL.MASK_FORMER.FREEZE = False
+    cfg.MODEL.MASK_FORMER.CLS_HEAD_DIM = 256
+    cfg.MODEL.MASK_FORMER.CLS_HEAD_LAYERS = 4
 
     # mask_former inference config
     cfg.MODEL.MASK_FORMER.TEST = CN()

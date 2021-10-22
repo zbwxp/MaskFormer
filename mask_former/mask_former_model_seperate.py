@@ -45,6 +45,8 @@ class MaskFormer_seperate(nn.Module):
         num_classes: int,
         cls_test: bool,
         norm: Optional[Union[str, Callable]] = None,
+        cls_head_dim: int,
+        cls_head_layers: int,
     ):
         """
         Args:
@@ -95,12 +97,11 @@ class MaskFormer_seperate(nn.Module):
             cost_mask=20.0,
             cost_dice=1.0,
         )
-        self.cls_head = nn.Sequential(
-            Conv2d(256, 256, 3, 1, 1, norm=get_norm(norm, 256), activation=F.relu),
-            Conv2d(256, 256, 3, 1, 1, norm=get_norm(norm, 256), activation=F.relu),
-            Conv2d(256, 256, 3, 1, 1, norm=get_norm(norm, 256), activation=F.relu),
-            Conv2d(256, 256, 3, 1, 1, norm=get_norm(norm, 256), activation=F.relu),
-            )
+        conv = Conv2d(cls_head_dim, cls_head_dim, 3, 1, 1, norm=get_norm(norm, 256), activation=F.relu)
+        head_convs = []
+        for i in range(cls_head_layers):
+            head_convs.append(conv)
+        self.add_module('cls_head', nn.Sequential(*head_convs))
         for module in self.cls_head:
             weight_init.c2_xavier_fill(module)
 
@@ -159,6 +160,8 @@ class MaskFormer_seperate(nn.Module):
             "num_classes": cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES,
             "cls_test": cfg.MODEL.MASK_FORMER.TEST.CLASSIFICATION,
             "norm": cfg.MODEL.SEM_SEG_HEAD.NORM,
+            "cls_head_dim": cfg.MODEL.MASK_FORMER.CLS_HEAD_DIM,
+            "cls_head_layers": cfg.MODEL.MASK_FORMER.CLS_HEAD_LAYERS,
         }
 
     @property
