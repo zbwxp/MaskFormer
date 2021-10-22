@@ -6,7 +6,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from detectron2.config import configurable
-from detectron2.layers import Conv2d
+from detectron2.layers import Conv2d, FrozenBatchNorm2d
 
 from .position_encoding import PositionEmbeddingSine
 from .transformer import Transformer
@@ -15,22 +15,22 @@ from .transformer import Transformer
 class MaskedPredictor(nn.Module):
     @configurable
     def __init__(
-        self,
-        in_channels,
-        mask_classification=True,
-        *,
-        num_classes: int,
-        hidden_dim: int,
-        num_queries: int,
-        nheads: int,
-        dropout: float,
-        dim_feedforward: int,
-        enc_layers: int,
-        dec_layers: int,
-        pre_norm: bool,
-        deep_supervision: bool,
-        mask_dim: int,
-        enforce_input_project: bool,
+            self,
+            in_channels,
+            mask_classification=True,
+            *,
+            num_classes: int,
+            hidden_dim: int,
+            num_queries: int,
+            nheads: int,
+            dropout: float,
+            dim_feedforward: int,
+            enc_layers: int,
+            dec_layers: int,
+            pre_norm: bool,
+            deep_supervision: bool,
+            mask_dim: int,
+            enforce_input_project: bool,
     ):
         """
         NOTE: this interface is experimental.
@@ -154,6 +154,20 @@ class MaskedPredictor(nn.Module):
             ]
         else:
             return [{"pred_masks": b} for b in outputs_seg_masks[:-1]]
+
+    def freeze(self):
+        """
+        Make this block not trainable.
+        This method sets all parameters to `requires_grad=False`,
+        and convert all BatchNorm layers to FrozenBatchNorm
+
+        Returns:
+            the block itself
+        """
+        for name, p in self.named_parameters():
+            p.requires_grad = False
+        FrozenBatchNorm2d.convert_frozen_batchnorm(self)
+        return self
 
 
 class MLP(nn.Module):

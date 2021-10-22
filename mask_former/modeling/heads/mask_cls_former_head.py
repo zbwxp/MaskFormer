@@ -57,6 +57,7 @@ class MaskClsFormerHead(nn.Module):
         # extra parameters
         transformer_predictor: nn.Module,
         transformer_in_feature: str,
+        freeze: bool,
     ):
         """
         NOTE: this interface is experimental.
@@ -85,6 +86,10 @@ class MaskClsFormerHead(nn.Module):
 
         self.num_classes = num_classes
 
+        if freeze:
+            self.pixel_decoder.freeze()
+            self.predictor.freeze()
+
     @classmethod
     def from_config(cls, cfg, input_shape: Dict[str, ShapeSpec]):
         return {
@@ -103,6 +108,7 @@ class MaskClsFormerHead(nn.Module):
                 else input_shape[cfg.MODEL.MASK_FORMER.TRANSFORMER_IN_FEATURE].channels,
                 mask_classification=True,
             ),
+            "freeze": cfg.MODEL.MASK_FORMER.FREEZE,
         }
 
     def forward(self, features):

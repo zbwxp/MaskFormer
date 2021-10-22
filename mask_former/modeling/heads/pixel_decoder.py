@@ -7,7 +7,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from detectron2.config import configurable
-from detectron2.layers import Conv2d, ShapeSpec, get_norm
+from detectron2.layers import Conv2d, ShapeSpec, get_norm, FrozenBatchNorm2d
 from detectron2.modeling import SEM_SEG_HEADS_REGISTRY
 
 from ..transformer.position_encoding import PositionEmbeddingSine
@@ -149,6 +149,20 @@ class BasePixelDecoder(nn.Module):
         logger = logging.getLogger(__name__)
         logger.warning("Calling forward() may cause unpredicted behavior of PixelDecoder module.")
         return self.forward_features(features)
+
+    def freeze(self):
+        """
+        Make this block not trainable.
+        This method sets all parameters to `requires_grad=False`,
+        and convert all BatchNorm layers to FrozenBatchNorm
+
+        Returns:
+            the block itself
+        """
+        for name, p in self.named_parameters():
+            p.requires_grad = False
+        FrozenBatchNorm2d.convert_frozen_batchnorm(self)
+        return self
 
 
 class TransformerEncoderOnly(nn.Module):
