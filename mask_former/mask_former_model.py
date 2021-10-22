@@ -1,9 +1,11 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
-from typing import Tuple
+from typing import Tuple, Optional, Union, Callable
 
 import torch
 from torch import nn
 from torch.nn import functional as F
+
+import fvcore.nn.weight_init as weight_init
 
 from detectron2.config import configurable
 from detectron2.data import MetadataCatalog
@@ -11,6 +13,7 @@ from detectron2.modeling import META_ARCH_REGISTRY, build_backbone, build_sem_se
 from detectron2.modeling.backbone import Backbone
 from detectron2.modeling.postprocessing import sem_seg_postprocess
 from detectron2.structures import ImageList
+from detectron2.layers import get_norm, Conv2d
 
 from .modeling.criterion import SetCriterion
 from .modeling.matcher import HungarianMatcher
@@ -40,7 +43,8 @@ class MaskFormer(nn.Module):
         pixel_mean: Tuple[float],
         pixel_std: Tuple[float],
         num_classes: int,
-        cls_test: bool
+        cls_test: bool,
+        norm: Optional[Union[str, Callable]] = None,
     ):
         """
         Args:
@@ -91,6 +95,14 @@ class MaskFormer(nn.Module):
             cost_mask=20.0,
             cost_dice=1.0,
         )
+        self.cls_head = nn.Sequential(
+            Conv2d(256, 256, 3, 1, norm=get_norm(norm, 256), activation=F.relu),
+            Conv2d(256, 256, 3, 1, norm=get_norm(norm, 256), activation=F.relu),
+            Conv2d(256, 256, 3, 1, norm=get_norm(norm, 256), activation=F.relu),
+            Conv2d(256, 256, 3, 1, norm=get_norm(norm, 256), activation=F.relu),
+            )
+        for module in self.cls_head:
+            weight_init.c2_xavier_fill(module)
 
     @classmethod
     def from_config(cls, cfg):
@@ -146,6 +158,7 @@ class MaskFormer(nn.Module):
             "pixel_std": cfg.MODEL.PIXEL_STD,
             "num_classes": cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES,
             "cls_test": cfg.MODEL.MASK_FORMER.TEST.CLASSIFICATION,
+            "norm": cfg.MODEL.SEM_SEG_HEAD.NORM,
         }
 
     @property
@@ -200,6 +213,13 @@ class MaskFormer(nn.Module):
 
             # individual cls branck
             maps = outputs['multi_level_feature_maps']
+            new_maps = []
+            for map in maps:
+                map = self.cls_head(map)
+                map = F.interpolate(map, size=features['res2'].size()[-2:], mode='nearest')
+                new_maps.append(map)
+
+            maps = torch.cat(new_maps, dim=1)
             # maps = outputs['mask_features']
             pred_logits = self.get_cls_vec(maps, targets)
 
@@ -315,7 +335,7 @@ class MaskFormer(nn.Module):
             masked_pool = self.pool(masked_map).squeeze() * (area / (map_weights + 1))[:, None]
             masked_pool_vec.append(masked_pool)
 
-        masked_pool_vec = torch.cat(masked_pool_vec, dim=0).squeeze()
+        masked_pool_vec = torch.cat(masked_pool_vec, dim=0)
         pred_logits = self.classifier(masked_pool_vec)
         return pred_logits
 
