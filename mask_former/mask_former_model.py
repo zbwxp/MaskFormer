@@ -96,10 +96,10 @@ class MaskFormer(nn.Module):
             cost_dice=1.0,
         )
         self.cls_head = nn.Sequential(
-            Conv2d(256, 256, 3, 1, norm=get_norm(norm, 256), activation=F.relu),
-            Conv2d(256, 256, 3, 1, norm=get_norm(norm, 256), activation=F.relu),
-            Conv2d(256, 256, 3, 1, norm=get_norm(norm, 256), activation=F.relu),
-            Conv2d(256, 256, 3, 1, norm=get_norm(norm, 256), activation=F.relu),
+            Conv2d(256, 256, 3, 1, 1, norm=get_norm(norm, 256), activation=F.relu),
+            Conv2d(256, 256, 3, 1, 1, norm=get_norm(norm, 256), activation=F.relu),
+            Conv2d(256, 256, 3, 1, 1, norm=get_norm(norm, 256), activation=F.relu),
+            Conv2d(256, 256, 3, 1, 1, norm=get_norm(norm, 256), activation=F.relu),
             )
         for module in self.cls_head:
             weight_init.c2_xavier_fill(module)
