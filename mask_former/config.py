@@ -54,7 +54,7 @@ def add_mask_former_config(cfg):
     cfg.MODEL.MASK_FORMER.FREEZE = False
     cfg.MODEL.MASK_FORMER.CLS_HEAD_DIM = 256
     cfg.MODEL.MASK_FORMER.CLS_HEAD_LAYERS = 4
-
+    cfg.MODEL.MASK_FORMER.USE_GT_TARGETS = True
     # mask_former inference config
     cfg.MODEL.MASK_FORMER.TEST = CN()
     cfg.MODEL.MASK_FORMER.TEST.PANOPTIC_ON = False

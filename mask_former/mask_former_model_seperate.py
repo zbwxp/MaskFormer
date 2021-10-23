@@ -17,6 +17,7 @@ from detectron2.layers import get_norm, Conv2d
 
 from .modeling.criterion import SetCriterion
 from .modeling.matcher import HungarianMatcher
+from .modeling.dice_matcher import HungarianMatcher_DICE
 from .modeling.transformer.transformer_predictor import MLP
 import matplotlib.pyplot as plt
 
@@ -48,6 +49,7 @@ class MaskFormer_seperate(nn.Module):
         cls_head_dim: int,
         cls_head_layers: int,
         freeze_maskformer: bool,
+        use_gt_targets: bool,
     ):
         """
         Args:
@@ -107,6 +109,14 @@ class MaskFormer_seperate(nn.Module):
             weight_init.c2_xavier_fill(module)
 
         self.freeze_maskformer = freeze_maskformer
+
+        self.use_gt_targets = use_gt_targets
+        if not self.use_gt_targets:
+            self.dice_matcher = HungarianMatcher_DICE(
+            cost_class=1,
+            cost_mask=20.0,
+            cost_dice=1.0,
+        )
 
     @classmethod
     def from_config(cls, cfg):
@@ -168,6 +178,7 @@ class MaskFormer_seperate(nn.Module):
             "cls_head_dim": cfg.MODEL.MASK_FORMER.CLS_HEAD_DIM,
             "cls_head_layers": cfg.MODEL.MASK_FORMER.CLS_HEAD_LAYERS,
             "freeze_maskformer": cfg.MODEL.MASK_FORMER.FREEZE,
+            "use_gt_targets": cfg.MODEL.MASK_FORMER.USE_GT_TARGETS
         }
 
     @property
@@ -246,6 +257,16 @@ class MaskFormer_seperate(nn.Module):
         pred_logits = self.get_cls_vec_loop(new_maps, pred_targets)
 
         if self.training:
+            if not self.use_gt_targets:
+                indices = self.dice_matcher(outputs, targets)
+                new_targets = []
+                for i, (indice, target) in enumerate(zip(indices, targets)):
+                    per_img_dict = {}
+                    per_img_dict.update({"labels": target['labels'][indice[-1]]})
+                    per_img_dict.update({"aug_masks": (outputs["pred_masks"][i][indice[0]] > 0.5).float()})
+                    new_targets.append(per_img_dict)
+
+                targets = new_targets
             pred_cls_logits = self.get_cls_vec_loop(new_maps, targets)
             labels = torch.cat([x['labels'] for x in targets])
             loss_ce_cls = F.cross_entropy(pred_cls_logits, labels)
