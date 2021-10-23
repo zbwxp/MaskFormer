@@ -47,6 +47,7 @@ class MaskFormer_seperate(nn.Module):
         norm: Optional[Union[str, Callable]] = None,
         cls_head_dim: int,
         cls_head_layers: int,
+        freeze_maskformer: bool,
     ):
         """
         Args:
@@ -90,6 +91,7 @@ class MaskFormer_seperate(nn.Module):
         self.classifier = MLP(1024, 1024, num_classes, 3)
         # self.classifier = MLP(256, 256, num_classes, 3)
         self.criterion.weight_dict.update({"loss_individual_cls": 1.0})
+        self.criterion.weight_dict.update({"loss_ce_tgt": 1.0})
         self.cls_test = cls_test
 
         self.matcher = HungarianMatcher(
@@ -104,6 +106,8 @@ class MaskFormer_seperate(nn.Module):
         self.add_module('cls_head', nn.Sequential(*head_convs))
         for module in self.cls_head:
             weight_init.c2_xavier_fill(module)
+
+        self.freeze_maskformer = freeze_maskformer
 
     @classmethod
     def from_config(cls, cfg):
@@ -162,6 +166,7 @@ class MaskFormer_seperate(nn.Module):
             "norm": cfg.MODEL.SEM_SEG_HEAD.NORM,
             "cls_head_dim": cfg.MODEL.MASK_FORMER.CLS_HEAD_DIM,
             "cls_head_layers": cfg.MODEL.MASK_FORMER.CLS_HEAD_LAYERS,
+            "freeze_maskformer": cfg.MODEL.MASK_FORMER.FREEZE,
         }
 
     @property
@@ -214,8 +219,9 @@ class MaskFormer_seperate(nn.Module):
         mask_pred_results = outputs["pred_masks"]
 
         losses = {}
-        # bipartite matching-based loss
-        # losses = self.criterion(outputs, targets)
+        if not self.freeze_maskformer and self.training:
+            # bipartite matching-based loss
+            losses = self.criterion(outputs, targets)
 
         # individual cls branck
         maps = outputs['multi_level_feature_maps']
@@ -237,10 +243,12 @@ class MaskFormer_seperate(nn.Module):
             pred_targets.append(mask_dict)
 
         pred_logits = self.get_cls_vec_loop(new_maps, pred_targets)
-        pred_cls_logits = self.get_cls_vec_loop(new_maps, targets)
-        labels = torch.cat([x['labels'] for x in targets])
-        loss_ce_cls = F.cross_entropy(pred_cls_logits, labels)
-        losses.update({"loss_individual_cls": loss_ce_cls})
+
+        if self.training:
+            pred_cls_logits = self.get_cls_vec_loop(new_maps, targets)
+            labels = torch.cat([x['labels'] for x in targets])
+            loss_ce_cls = F.cross_entropy(pred_cls_logits, labels)
+            losses.update({"loss_individual_cls": loss_ce_cls})
 
         idx = 0
         preds = []
@@ -261,8 +269,7 @@ class MaskFormer_seperate(nn.Module):
 
         if self.training:
             loss_ce = F.cross_entropy(preds, sem_seg_gts, ignore_index=255, reduction='mean')
-
-            losses.update({"loss_ce": loss_ce})
+            losses.update({"loss_ce_tgt": loss_ce})
 
             for k in list(losses.keys()):
                 if k in self.criterion.weight_dict:

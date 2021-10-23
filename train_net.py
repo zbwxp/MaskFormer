@@ -16,7 +16,7 @@ import torch
 import detectron2.utils.comm as comm
 from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.config import get_cfg
-from detectron2.data import MetadataCatalog, build_detection_train_loader
+from detectron2.data import MetadataCatalog, build_detection_train_loader, build_detection_test_loader
 from detectron2.engine import DefaultTrainer, default_argument_parser, default_setup, launch
 from detectron2.evaluation import (
     CityscapesInstanceEvaluator,
@@ -40,6 +40,44 @@ from mask_former import (
     add_mask_former_config,
 )
 
+from evaluation import ClsEvaluator
+# for test_loader
+from detectron2.data.common import DatasetFromList, MapDataset
+from detectron2.data.samplers import InferenceSampler
+from detectron2.data.build import trivial_batch_collator, get_detection_dataset_dicts
+
+
+def build_classification_test_loader(cfg, dataset_name, sampler=None, num_workers=0):
+    mapper = MaskFormerSemanticDatasetMapper(cfg, False)
+    num_workers = cfg.DATALOADER.NUM_WORKERS
+    if isinstance(dataset_name, str):
+        dataset_name = [dataset_name]
+
+    dataset = get_detection_dataset_dicts(
+        dataset_name,
+        filter_empty=False,
+        proposal_files=[
+            cfg.DATASETS.PROPOSAL_FILES_TEST[list(cfg.DATASETS.TEST).index(x)] for x in dataset_name
+        ]
+        if cfg.MODEL.LOAD_PROPOSALS
+        else None,
+    )
+    if isinstance(dataset, list):
+        dataset = DatasetFromList(dataset, copy=False)
+    if mapper is not None:
+        dataset = MapDataset(dataset, mapper)
+    if sampler is None:
+        sampler = InferenceSampler(len(dataset))
+    # Always use 1 image per worker during inference since this is the
+    # standard when reporting inference time in papers.
+    batch_sampler = torch.utils.data.sampler.BatchSampler(sampler, 1, drop_last=False)
+    data_loader = torch.utils.data.DataLoader(
+        dataset,
+        num_workers=num_workers,
+        batch_sampler=batch_sampler,
+        collate_fn=trivial_batch_collator,
+    )
+    return data_loader
 
 class Trainer(DefaultTrainer):
     """
@@ -59,6 +97,13 @@ class Trainer(DefaultTrainer):
             output_folder = os.path.join(cfg.OUTPUT_DIR, "inference")
         evaluator_list = []
         evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
+        # if cfg.MODEL.MASK_FORMER.TEST.CLASSIFICATION:
+        #     evaluator_list = [
+        #         ClsEvaluator(
+        #             dataset_name,
+        #             distributed=True,
+        #         ), ]
+        #     return DatasetEvaluators(evaluator_list)
         if evaluator_type in ["sem_seg", "ade20k_panoptic_seg"]:
             evaluator_list.append(
                 SemSegEvaluator(
@@ -99,6 +144,13 @@ class Trainer(DefaultTrainer):
         elif len(evaluator_list) == 1:
             return evaluator_list[0]
         return DatasetEvaluators(evaluator_list)
+
+    @classmethod
+    def build_test_loader(cls, cfg, dataset_name):
+        if cfg.MODEL.MASK_FORMER.TEST.CLASSIFICATION:
+            return build_classification_test_loader(cfg, dataset_name)
+        else:
+            return build_detection_test_loader(cfg, dataset_name)
 
     @classmethod
     def build_train_loader(cls, cfg):
@@ -160,6 +212,8 @@ class Trainer(DefaultTrainer):
                 hyperparams = copy.copy(defaults)
                 if "backbone" in module_name:
                     hyperparams["lr"] = hyperparams["lr"] * cfg.SOLVER.BACKBONE_MULTIPLIER
+                if "sem_seg_head" in module_name:
+                    hyperparams["lr"] = hyperparams["lr"] * cfg.SOLVER.SEM_SEG_HEAD_MULTIPLIER
                 if (
                     "relative_position_bias_table" in module_param_name
                     or "absolute_pos_embed" in module_param_name

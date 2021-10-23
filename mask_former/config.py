@@ -24,6 +24,7 @@ def add_mask_former_config(cfg):
     # optimizer
     cfg.SOLVER.OPTIMIZER = "ADAMW"
     cfg.SOLVER.BACKBONE_MULTIPLIER = 0.1
+    cfg.SOLVER.SEM_SEG_HEAD_MULTIPLIER = 0.1
 
     # mask_former model config
     cfg.MODEL.MASK_FORMER = CN()
