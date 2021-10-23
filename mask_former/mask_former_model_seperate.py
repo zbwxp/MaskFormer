@@ -237,9 +237,11 @@ class MaskFormer_seperate(nn.Module):
             pred_targets.append(mask_dict)
 
         pred_logits = self.get_cls_vec_loop(new_maps, pred_targets)
+        pred_cls_logits = self.get_cls_vec_loop(new_maps, targets)
+        labels = torch.cat([x['labels'] for x in targets])
+        loss_ce_cls = F.cross_entropy(pred_cls_logits, labels)
+        losses.update({"loss_individual_cls": loss_ce_cls})
 
-        # labels = torch.cat([x['labels'] for x in targets])
-        # loss_ce = F.cross_entropy(pred_logits, labels)
         idx = 0
         preds = []
         for per_img_pred in pred_targets:
@@ -260,7 +262,7 @@ class MaskFormer_seperate(nn.Module):
         if self.training:
             loss_ce = F.cross_entropy(preds, sem_seg_gts, ignore_index=255, reduction='mean')
 
-            losses.update({"loss_individual_cls": loss_ce})
+            losses.update({"loss_ce": loss_ce})
 
             for k in list(losses.keys()):
                 if k in self.criterion.weight_dict:
