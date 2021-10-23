@@ -34,6 +34,9 @@ def add_mask_former_config(cfg):
     cfg.MODEL.MASK_FORMER.NO_OBJECT_WEIGHT = 0.1
     cfg.MODEL.MASK_FORMER.DICE_WEIGHT = 1.0
     cfg.MODEL.MASK_FORMER.MASK_WEIGHT = 20.0
+    cfg.MODEL.MASK_FORMER.TGT_WEIGHT = 1.0
+    cfg.MODEL.MASK_FORMER.CLS_WEIGHT = 5.0
+
 
     # transformer config
     cfg.MODEL.MASK_FORMER.NHEADS = 8

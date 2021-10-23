@@ -90,8 +90,7 @@ class MaskFormer_seperate(nn.Module):
         self.pool = nn.AdaptiveAvgPool2d(1)
         self.classifier = MLP(1024, 1024, num_classes, 3)
         # self.classifier = MLP(256, 256, num_classes, 3)
-        self.criterion.weight_dict.update({"loss_individual_cls": 1.0})
-        self.criterion.weight_dict.update({"loss_ce_tgt": 1.0})
+
         self.cls_test = cls_test
 
         self.matcher = HungarianMatcher(
@@ -134,6 +133,8 @@ class MaskFormer_seperate(nn.Module):
             for i in range(dec_layers - 1):
                 aux_weight_dict.update({k + f"_{i}": v for k, v in weight_dict.items()})
             weight_dict.update(aux_weight_dict)
+        weight_dict.update({"loss_individual_cls": cfg.MODEL.MASK_FORMER.CLS_WEIGHT})
+        weight_dict.update({"loss_ce_tgt": cfg.MODEL.MASK_FORMER.TGT_WEIGHT})
 
         losses = ["labels", "masks"]
 
