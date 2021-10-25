@@ -18,4 +18,5 @@ from .data.dataset_mappers.mask_former_semantic_dataset_mapper import (
 from .mask_former_model import MaskFormer
 from .mask_former_model_seperate import MaskFormer_seperate
 from .mask_former_model_seperate_v2 import MaskFormer_seperatev2
+from .mask_former_model_seperate_v3 import MaskFormer_seperatev3
 from .test_time_augmentation import SemanticSegmentorWithTTA
