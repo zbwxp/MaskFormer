@@ -50,6 +50,8 @@ class MaskFormer_seperatev3(nn.Module):
         cls_head_layers: int,
         freeze_maskformer: bool,
         use_gt_targets: bool,
+        cls_head_kernel_size: int,
+
     ):
         """
         Args:
@@ -101,7 +103,10 @@ class MaskFormer_seperatev3(nn.Module):
             cost_mask=20.0,
             cost_dice=1.0,
         )
-        conv = Conv2d(cls_head_dim, cls_head_dim, 1, 1, norm=get_norm(norm, 256), activation=F.relu)
+        if cls_head_kernel_size == 1:
+            conv = Conv2d(cls_head_dim, cls_head_dim, 1, 1, norm=get_norm(norm, 256), activation=F.relu)
+        else:
+            conv = Conv2d(cls_head_dim, cls_head_dim, 3, 1, 1, norm=get_norm(norm, 256), activation=F.relu)
         # each stage assign a nnsequence
         multi_stage_heads = []
         for l in range(4):
@@ -185,7 +190,8 @@ class MaskFormer_seperatev3(nn.Module):
             "cls_head_dim": cfg.MODEL.MASK_FORMER.CLS_HEAD_DIM,
             "cls_head_layers": cfg.MODEL.MASK_FORMER.CLS_HEAD_LAYERS,
             "freeze_maskformer": cfg.MODEL.MASK_FORMER.FREEZE,
-            "use_gt_targets": cfg.MODEL.MASK_FORMER.USE_GT_TARGETS
+            "use_gt_targets": cfg.MODEL.MASK_FORMER.USE_GT_TARGETS,
+            "cls_head_kernel_size": cfg.MODEL.MASK_FORMER.CLS_HEAD_KERNEL_SIZE,
         }
 
     @property
