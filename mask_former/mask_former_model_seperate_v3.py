@@ -259,7 +259,7 @@ class MaskFormer_seperatev3(nn.Module):
 
         if self.training:
             # gt target loss
-            pred_cls_logits = self.get_cls_vec_loop(new_maps, targets)
+            pred_cls_logits = self.get_cls_vec_loop_orig(new_maps, targets)
             labels = torch.cat([x['labels'] for x in targets])
             loss_ce_cls = F.cross_entropy(pred_cls_logits, labels)
             losses.update({"loss_cls_by_tgt": loss_ce_cls})
@@ -275,7 +275,7 @@ class MaskFormer_seperatev3(nn.Module):
                 pred_targets.append(mask_dict)
 
             batch_size = len(batched_inputs)
-            pred_cls_logits = self.get_cls_vec_loop(new_maps, pred_targets)
+            pred_cls_logits = self.get_cls_vec_loop_orig_test(new_maps, pred_targets)
             pred_cls_logits = pred_cls_logits.reshape(batch_size, -1, self.num_classes + 1)
 
             # use pred targets to train negtive samples
@@ -378,6 +378,57 @@ class MaskFormer_seperatev3(nn.Module):
         masked_pool_vec = torch.cat(masked_pool_vec, dim=0)
         pred_logits = self.classifier(masked_pool_vec)
         return pred_logits
+
+    def get_cls_vec_loop_orig(self, maps, targets):
+        masked_pool_vec = []
+        masks = [x['aug_masks'] for x in targets]
+        for i, per_img_masks_orig in enumerate(masks):
+            per_img_features = maps[i]
+            per_img_masks = F.interpolate(per_img_masks_orig[None, :], size=per_img_features.size()[-2:], mode="nearest")
+            total_area = per_img_masks.size(-1) * per_img_masks.size(-2)
+            areas = per_img_masks[0].flatten(-2).sum(-1)
+            if 0 in areas:
+                tmp = F.interpolate(per_img_masks_orig[None, :],
+                                    size=per_img_features.size()[-2:],
+                                    mode="bilinear",
+                                    align_corners=False)
+                per_img_masks[0][areas==0] = (tmp[0][areas == 0] > 0).float()
+                areas = per_img_masks[0].flatten(-2).sum(-1)
+            masked_map = torch.einsum("bqhw,chw->qchw", per_img_masks, per_img_features)
+            # masked_map = F.max_pool2d(masked_map, kernel_size=3, stride=2, padding=1)
+            map_weights = total_area / (areas + 1)
+            masked_pool = self.pool(masked_map).squeeze() * map_weights[:, None]
+            masked_pool_vec.append(masked_pool)
+        masked_pool_vec = torch.cat(masked_pool_vec, dim=0)
+        pred_logits = self.classifier(masked_pool_vec)
+        return pred_logits
+
+    def get_cls_vec_loop_orig_test(self, maps, targets):
+        masked_pool_vec = []
+        masks = [x['aug_masks'] for x in targets]
+        for i, per_img_masks_orig in enumerate(masks):
+            per_img_features = maps[i]
+            per_img_masks = F.interpolate(per_img_masks_orig[None, :], size=per_img_features.size()[-2:], mode="nearest")
+            total_area = per_img_masks.size(-1) * per_img_masks.size(-2)
+            areas = per_img_masks[0].flatten(-2).sum(-1)
+            if 0 in areas:
+                tmp = F.interpolate(per_img_masks_orig[None, :],
+                                    size=per_img_features.size()[-2:],
+                                    mode="bilinear",
+                                    align_corners=False)
+                per_img_masks[0][areas==0] = (tmp[0][areas == 0] > 0).float()
+                areas = per_img_masks[0].flatten(-2).sum(-1)
+
+            for i_mask, mask in enumerate(per_img_masks[0]):
+                masked_map = torch.einsum("hw,chw->chw", mask, per_img_features)
+                # masked_map = F.max_pool2d(masked_map, kernel_size=3, stride=2, padding=1)
+                map_weights = total_area / (areas + 1)
+                masked_pool = self.pool(masked_map).squeeze() * map_weights[i_mask, None]
+                masked_pool_vec.append(masked_pool)
+        masked_pool_vec = torch.stack(masked_pool_vec, dim=0)
+        pred_logits = self.classifier(masked_pool_vec)
+        return pred_logits
+
 
     def prepare_targets(self, targets, images):
         h, w = images.tensor.shape[-2:]
