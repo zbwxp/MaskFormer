@@ -135,15 +135,16 @@ class BasePixelDecoder(nn.Module):
             output_conv = self.output_convs[idx]
             if lateral_conv is None:
                 y = output_conv(x)
-                # maps.append(y)
-                maps.append(F.interpolate(y, size=features["res2"].size()[-2:], mode='nearest'))
+                maps.append(y)
+                # maps.append(F.interpolate(y, size=features["res2"].size()[-2:], mode='nearest'))
             else:
                 cur_fpn = lateral_conv(x)
-                maps.append(F.interpolate(cur_fpn, size=features["res2"].size()[-2:], mode='nearest'))
+                maps.append(cur_fpn)
+                # maps.append(F.interpolate(cur_fpn, size=features["res2"].size()[-2:], mode='nearest'))
                 # Following FPN implementation, we use nearest upsampling here
                 y = cur_fpn + F.interpolate(y, size=cur_fpn.shape[-2:], mode="nearest")
                 y = output_conv(y)
-        maps = torch.cat(maps, dim=1)
+        # maps = torch.cat(maps, dim=1)
         return self.mask_features(y), None, maps
 
     def forward(self, features, targets=None):

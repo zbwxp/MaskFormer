@@ -287,23 +287,7 @@ class MaskFormer_seperatev2(nn.Module):
             pred_targets.append({"pred_masks": unfiltered_pred_targets[i]["pred_masks"][keep]})
             pred_logits.append(pred_cls_logits[i][keep])
 
-        # generate pred
-        idx = 0
-        preds = []
-        for per_img_pred, per_img_cls in zip(pred_targets, pred_logits):
-            mask_pred_result = per_img_pred["pred_masks"]
-            num_masks = mask_pred_result.size(0)
-            cls_logit = per_img_cls
-            mask_cls = F.softmax(cls_logit, dim=-1)[..., :-1]
-            mask_pred = mask_pred_result.sigmoid()
-            semseg = torch.einsum("qc,qhw->chw", mask_cls, mask_pred)
-            preds.append(semseg)
-            idx += num_masks
 
-        preds = torch.stack(preds, dim=0)
-        sem_seg_gts = [x["sem_seg"].to(self.device) for x in batched_inputs]
-        sem_seg_gts = ImageList.from_tensors(sem_seg_gts, self.size_divisibility).tensor
-        preds = F.interpolate(preds, size=sem_seg_gts.size()[-2:], mode='bilinear', align_corners=False)
 
         if self.training:
             # loss_ce = F.cross_entropy(preds, sem_seg_gts, ignore_index=255, reduction='mean')
@@ -318,7 +302,25 @@ class MaskFormer_seperatev2(nn.Module):
 
             return losses
         else:
-            r = preds
+            # generate pred
+            idx = 0
+            preds = []
+            for per_img_pred, per_img_cls in zip(pred_targets, pred_logits):
+                mask_pred_result = per_img_pred["pred_masks"]
+                num_masks = mask_pred_result.size(0)
+                cls_logit = per_img_cls
+                mask_cls = F.softmax(cls_logit, dim=-1)[..., :-1]
+                mask_pred = mask_pred_result.sigmoid()
+                semseg = torch.einsum("qc,qhw->chw", mask_cls, mask_pred)
+                preds.append(semseg)
+                idx += num_masks
+
+            preds = torch.stack(preds, dim=0)
+            sem_seg_gts = [x["sem_seg"].to(self.device) for x in batched_inputs]
+            sem_seg_gts = ImageList.from_tensors(sem_seg_gts, self.size_divisibility).tensor
+            preds = F.interpolate(preds, size=sem_seg_gts.size()[-2:], mode='bilinear', align_corners=False)
+
+            r = preds[0]
             image_size = images.image_sizes[0]
             height = batched_inputs[0].get("height", image_size[0])
             width = batched_inputs[0].get("width", image_size[1])
