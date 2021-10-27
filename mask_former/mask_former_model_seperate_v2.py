@@ -254,16 +254,16 @@ class MaskFormer_seperatev2(nn.Module):
 
 
         # full 100 targets
+        if not self.use_gt_targets or not self.training:
+            unfiltered_pred_targets = []
+            for mask_pred_result in mask_pred_results:
+                unfiltered_mask_dict = {"aug_masks": (mask_pred_result > 0.5).float()}
+                unfiltered_mask_dict.update({"pred_masks": mask_pred_result})
+                unfiltered_pred_targets.append(unfiltered_mask_dict)
 
-        unfiltered_pred_targets = []
-        for mask_pred_result in mask_pred_results:
-            unfiltered_mask_dict = {"aug_masks": (mask_pred_result > 0.5).float()}
-            unfiltered_mask_dict.update({"pred_masks": mask_pred_result})
-            unfiltered_pred_targets.append(unfiltered_mask_dict)
-
-        batch_size = len(batched_inputs)
-        pred_cls_logits = self.get_cls_vec_loop(new_maps, unfiltered_pred_targets)
-        pred_cls_logits = pred_cls_logits.reshape(batch_size, -1, self.num_classes + 1)
+            batch_size = len(batched_inputs)
+            pred_cls_logits = self.get_cls_vec_loop(new_maps, unfiltered_pred_targets)
+            pred_cls_logits = pred_cls_logits.reshape(batch_size, -1, self.num_classes + 1)
 
         # use pred targets to train negtive samples
         if self.training:
@@ -279,15 +279,6 @@ class MaskFormer_seperatev2(nn.Module):
 
         # maps = torch.cat(new_maps, dim=1)
         # maps = outputs['mask_features']
-        # prepare targets from maskformer pred
-        pred_targets = []
-        pred_logits = []
-        for i, mask_pred_result in enumerate(mask_pred_results):
-            keep = self.filter_masks(mask_pred_result)
-            pred_targets.append({"pred_masks": unfiltered_pred_targets[i]["pred_masks"][keep]})
-            pred_logits.append(pred_cls_logits[i][keep])
-
-
 
         if self.training:
             # loss_ce = F.cross_entropy(preds, sem_seg_gts, ignore_index=255, reduction='mean')
@@ -302,6 +293,13 @@ class MaskFormer_seperatev2(nn.Module):
 
             return losses
         else:
+            # prepare targets from maskformer pred
+            pred_targets = []
+            pred_logits = []
+            for i, mask_pred_result in enumerate(mask_pred_results):
+                keep = self.filter_masks(mask_pred_result)
+                pred_targets.append({"pred_masks": unfiltered_pred_targets[i]["pred_masks"][keep]})
+                pred_logits.append(pred_cls_logits[i][keep])
             # generate pred
             idx = 0
             preds = []
