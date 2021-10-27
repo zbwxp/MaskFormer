@@ -315,7 +315,7 @@ class MaskFormer_seperatev3(nn.Module):
 
             return losses
         else:
-            r = preds
+            r = preds[0]
             image_size = images.image_sizes[0]
             height = batched_inputs[0].get("height", image_size[0])
             width = batched_inputs[0].get("width", image_size[1])
