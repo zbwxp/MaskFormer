@@ -17,7 +17,7 @@ import detectron2.utils.comm as comm
 from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.config import get_cfg
 from detectron2.data import MetadataCatalog, build_detection_train_loader
-from detectron2.engine import DefaultTrainer, default_argument_parser, default_setup, launch
+from detectron2.engine import DefaultTrainer, default_argument_parser, default_setup, launch, create_ddp_model
 from detectron2.evaluation import (
     CityscapesInstanceEvaluator,
     CityscapesSemSegEvaluator,
@@ -45,6 +45,9 @@ class Trainer(DefaultTrainer):
     """
     Extension of the Trainer class adapted to DETR.
     """
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        self.model = create_ddp_model(self.model, broadcast_buffers=False, find_unused_parameters=False)
 
     @classmethod
     def build_evaluator(cls, cfg, dataset_name, output_folder=None):
