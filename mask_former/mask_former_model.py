@@ -191,8 +191,8 @@ class MaskFormer(nn.Module):
             # mask_pred = outputs["pred_masks"].sigmoid()
             mask_pred = outputs["pred_masks"]
             # semseg = torch.einsum("bqc,bqhw->bchw", mask_cls, mask_pred)
-            semseg = torch.einsum("bqc,bqhw->bchw", mask_cls, mask_pred)[:, :-1]
-            semseg = F.interpolate(semseg, size=sem_seg_gts.size()[-2:], mode='bilinear', align_corners=False)
+            # semseg = torch.einsum("bqc,bqhw->bchw", mask_cls, mask_pred)[:, :-1]
+            semseg = F.interpolate(mask_pred, size=sem_seg_gts.size()[-2:], mode='bilinear', align_corners=False)
 
             losses = {}
             loss = F.cross_entropy(semseg, sem_seg_gts, ignore_index=255, reduction='mean')
@@ -204,8 +204,8 @@ class MaskFormer(nn.Module):
                     # mask_pred = aux_outputs["pred_masks"].sigmoid()
                     mask_pred = aux_outputs["pred_masks"]
                     # semseg = torch.einsum("bqc,bqhw->bchw", mask_cls, mask_pred)
-                    semseg = torch.einsum("bqc,bqhw->bchw", mask_cls, mask_pred)[:, :-1]
-                    semseg = F.interpolate(semseg, size=sem_seg_gts.size()[-2:], mode='bilinear', align_corners=False)
+                    # semseg = torch.einsum("bqc,bqhw->bchw", mask_cls, mask_pred)[:, :-1]
+                    semseg = F.interpolate(mask_pred, size=sem_seg_gts.size()[-2:], mode='bilinear', align_corners=False)
                     loss = F.cross_entropy(semseg, sem_seg_gts, ignore_index=255, reduction='mean')
                     losses.update({"loss_level"+f"_{i}": loss})
             # bipartite matching-based loss
