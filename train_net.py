@@ -47,7 +47,7 @@ class Trainer(DefaultTrainer):
     """
     def __init__(self, cfg):
         super().__init__(cfg)
-        self.model = create_ddp_model(self.model, broadcast_buffers=False, find_unused_parameters=False)
+        self.model = create_ddp_model(self.model, broadcast_buffers=False, find_unused_parameters=True)
 
     @classmethod
     def build_evaluator(cls, cfg, dataset_name, output_folder=None):
