@@ -100,7 +100,7 @@ class MaskFormerHead(nn.Module):
                 cfg.MODEL.SEM_SEG_HEAD.CONVS_DIM
                 if cfg.MODEL.MASK_FORMER.TRANSFORMER_IN_FEATURE == "transformer_encoder"
                 else input_shape[cfg.MODEL.MASK_FORMER.TRANSFORMER_IN_FEATURE].channels,
-                mask_classification=True,
+                mask_classification=False,
             ),
         }
 

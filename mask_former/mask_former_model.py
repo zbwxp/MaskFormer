@@ -187,7 +187,7 @@ class MaskFormer(nn.Module):
             sem_seg_gts = ImageList.from_tensors(sem_seg_gts, self.size_divisibility).tensor
 
             # mask_cls = F.softmax(outputs["pred_logits"], dim=-1)[..., :-1]
-            mask_cls = outputs["pred_logits"]
+            # mask_cls = outputs["pred_logits"]
             # mask_pred = outputs["pred_masks"].sigmoid()
             mask_pred = outputs["pred_masks"]
             # semseg = torch.einsum("bqc,bqhw->bchw", mask_cls, mask_pred)
@@ -200,7 +200,7 @@ class MaskFormer(nn.Module):
             if "aux_outputs" in outputs:
                 for i, aux_outputs in enumerate(outputs["aux_outputs"]):
                     # mask_cls = F.softmax(aux_outputs["pred_logits"], dim=-1)[..., :-1]
-                    mask_cls = aux_outputs["pred_logits"]
+                    # mask_cls = aux_outputs["pred_logits"]
                     # mask_pred = aux_outputs["pred_masks"].sigmoid()
                     mask_pred = aux_outputs["pred_masks"]
                     # semseg = torch.einsum("bqc,bqhw->bchw", mask_cls, mask_pred)
