@@ -34,21 +34,21 @@ MODEL:
     ENTITY: True
 
 INPUT:
-  MIN_SIZE_TRAIN: !!python/object/apply:eval ["[int(x * 0.1 * 320) for x in range(5, 21)]"]
+  MIN_SIZE_TRAIN: !!python/object/apply:eval ["[int(x * 0.1 * 512) for x in range(5, 21)]"]
   MIN_SIZE_TRAIN_SAMPLING: "choice"
-  MIN_SIZE_TEST: 320
-  MAX_SIZE_TRAIN: 1280
-  MAX_SIZE_TEST: 1280
+  MIN_SIZE_TEST: 512
+  MAX_SIZE_TRAIN: 2048
+  MAX_SIZE_TEST: 2048
   CROP:
     ENABLED: True
     TYPE: "absolute"
-    SIZE: (320, 320)
+    SIZE: (512, 512)
     SINGLE_CATEGORY_MAX_AREA: 1.0
   COLOR_AUG_SSD: True
-  SIZE_DIVISIBILITY: 320  # used in dataset mapper
+  SIZE_DIVISIBILITY: 512  # used in dataset mapper
 
 SOLVER:
-  IMS_PER_BATCH: 64
+  IMS_PER_BATCH: 256
   BASE_LR: 0.1
 #  STEPS: (50000,100000)
   MAX_ITER: 160000 # 165k annotations
