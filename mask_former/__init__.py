@@ -20,3 +20,4 @@ from .data.dataset_mappers.mask_former_multiscale_dataset_mapper import (
 from .mask_former_model import MaskFormer
 from .masked_classification import MaskedClassification
 from .test_time_augmentation import SemanticSegmentorWithTTA
+from .multi_classification import MultiClassification
