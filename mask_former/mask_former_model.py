@@ -18,7 +18,6 @@ from .masked_classification import MaskedClassification
 import matplotlib.pyplot as plt
 
 
-
 @META_ARCH_REGISTRY.register()
 class MaskFormer(nn.Module):
     """
@@ -27,21 +26,21 @@ class MaskFormer(nn.Module):
 
     @configurable
     def __init__(
-        self,
-        *,
-        backbone: Backbone,
-        sem_seg_head: nn.Module,
-        criterion: nn.Module,
-        num_queries: int,
-        panoptic_on: bool,
-        object_mask_threshold: float,
-        overlap_threshold: float,
-        metadata,
-        size_divisibility: int,
-        sem_seg_postprocess_before_inference: bool,
-        pixel_mean: Tuple[float],
-        pixel_std: Tuple[float],
-        masked_classification: nn.Module,
+            self,
+            *,
+            backbone: Backbone,
+            sem_seg_head: nn.Module,
+            criterion: nn.Module,
+            num_queries: int,
+            panoptic_on: bool,
+            object_mask_threshold: float,
+            overlap_threshold: float,
+            metadata,
+            size_divisibility: int,
+            sem_seg_postprocess_before_inference: bool,
+            pixel_mean: Tuple[float],
+            pixel_std: Tuple[float],
+            masked_classification: nn.Module,
     ):
         """
         Args:
@@ -80,13 +79,15 @@ class MaskFormer(nn.Module):
         self.sem_seg_postprocess_before_inference = sem_seg_postprocess_before_inference
         self.register_buffer("pixel_mean", torch.Tensor(pixel_mean).view(-1, 1, 1), False)
         self.register_buffer("pixel_std", torch.Tensor(pixel_std).view(-1, 1, 1), False)
-        self.register_buffer("collect_cls_gt", (torch.Tensor(150) * 0).long(), False)
-        self.register_buffer("collect_cls_pred", (torch.Tensor(150) * 0).long(), False)
+        self.register_buffer("collect_cls_gt", (torch.Tensor(151) * 0).long(), False)
+        self.register_buffer("collect_cls_pred", (torch.Tensor(151) * 0).long(), False)
+        self.register_buffer("collect_cls_correct", (torch.Tensor(151) * 0).long(), False)
+        self.register_buffer("_iter", torch.zeros([1]))
 
         self.matcher = HungarianMatcher(
-            cost_class=0,
+            cost_class=1,
             cost_mask=0,
-            cost_dice=1,
+            cost_dice=0,
         )
 
         self.masked_classifier = masked_classification
@@ -138,8 +139,8 @@ class MaskFormer(nn.Module):
             "metadata": MetadataCatalog.get(cfg.DATASETS.TRAIN[0]),
             "size_divisibility": cfg.MODEL.MASK_FORMER.SIZE_DIVISIBILITY,
             "sem_seg_postprocess_before_inference": (
-                cfg.MODEL.MASK_FORMER.TEST.SEM_SEG_POSTPROCESSING_BEFORE_INFERENCE
-                or cfg.MODEL.MASK_FORMER.TEST.PANOPTIC_ON
+                    cfg.MODEL.MASK_FORMER.TEST.SEM_SEG_POSTPROCESSING_BEFORE_INFERENCE
+                    or cfg.MODEL.MASK_FORMER.TEST.PANOPTIC_ON
             ),
             "pixel_mean": cfg.MODEL.PIXEL_MEAN,
             "pixel_std": cfg.MODEL.PIXEL_STD,
@@ -206,13 +207,25 @@ class MaskFormer(nn.Module):
             mask_cls_results = outputs["pred_logits"]
             mask_pred_results = outputs["pred_masks"]
 
-            # targets = self.get_targets(batched_inputs)
+            targets = self.get_targets(batched_inputs)
             # weight = torch.zeros(151).to(mask_cls_results) + 0.5
             # weight[targets[0]['labels']] += 0.1
             # mask_cls_results = mask_cls_results * weight[None, None, :]
 
-            # mask_cls_results = mask_cls_results[:, targets[0]['labels']]
-            # mask_pred_results = mask_pred_results[:, targets[0]['labels']]
+            mask_cls_results = mask_cls_results[:, targets[0]['labels']]
+            mask_pred_results = mask_pred_results[:, targets[0]['labels']]
+
+            # pred_labels = mask_cls_results.argmax(-1)[0]
+            # tgt_labels = targets[0]['labels'].to(pred_labels)
+
+            # self.collect_cls_gt[tgt_labels] += 1
+            # self.collect_cls_pred[pred_labels] += 1
+            # correct = tgt_labels[tgt_labels == pred_labels]
+            # if len(correct) > 0:
+            #     self.collect_cls_correct[correct] += 1
+            # self._iter += 1
+            # if self._iter % 100 == 0:
+            #     print(self.collect_cls_correct / self.collect_cls_gt)
 
             # indices = self.matcher(outputs, targets)
 
