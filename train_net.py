@@ -40,7 +40,7 @@ from mask_former import (
     add_mask_former_config,
     MaskFormerMultiClsDatasetMapper,
 )
-from evaluation import ClsEvaluator
+from evaluation import ClsEvaluator, MultiClsEvaluator
 
 
 class Trainer(DefaultTrainer):
@@ -63,6 +63,13 @@ class Trainer(DefaultTrainer):
         evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
         if cfg.MODEL.MASK_FORMER.DEFORMABLE_PREDICTOR:
             evaluator_type = "sem_seg"
+        if 'Classification' in cfg.MODEL.META_ARCHITECTURE:
+            evaluator_list.append(
+                MultiClsEvaluator(
+                    dataset_name,
+                    distributed=True,
+                ))
+            return DatasetEvaluators(evaluator_list)
         if evaluator_type in ["classification"]:
             evaluator_list.append(
                 ClsEvaluator(
@@ -257,6 +264,9 @@ def main(args):
         model = Trainer.build_model(cfg)
         DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
             cfg.MODEL.WEIGHTS, resume=args.resume
+        )
+        DetectionCheckpointer(model.masked_classifier, save_dir=cfg.OUTPUT_DIR).resume_or_load(
+            '/media/bz/D/美团/MaskFormer/pretrain/R50_masked_cls/model_final_7b30956.pth', resume=args.resume
         )
         res = Trainer.test(cfg, model)
         if cfg.TEST.AUG.ENABLED:
