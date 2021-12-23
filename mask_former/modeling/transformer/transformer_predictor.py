@@ -2,11 +2,10 @@
 # Modified by Bowen Cheng from: https://github.com/facebookresearch/detr/blob/master/models/detr.py
 import fvcore.nn.weight_init as weight_init
 import torch
+from detectron2.config import configurable
+from detectron2.layers import Conv2d, get_norm
 from torch import nn
 from torch.nn import functional as F
-
-from detectron2.config import configurable
-from detectron2.layers import Conv2d
 
 from .position_encoding import PositionEmbeddingSine
 from .transformer import Transformer
@@ -15,22 +14,22 @@ from .transformer import Transformer
 class TransformerPredictor(nn.Module):
     @configurable
     def __init__(
-        self,
-        in_channels,
-        mask_classification=True,
-        *,
-        num_classes: int,
-        hidden_dim: int,
-        num_queries: int,
-        nheads: int,
-        dropout: float,
-        dim_feedforward: int,
-        enc_layers: int,
-        dec_layers: int,
-        pre_norm: bool,
-        deep_supervision: bool,
-        mask_dim: int,
-        enforce_input_project: bool,
+            self,
+            in_channels,
+            mask_classification=True,
+            *,
+            num_classes: int,
+            hidden_dim: int,
+            num_queries: int,
+            nheads: int,
+            dropout: float,
+            dim_feedforward: int,
+            enc_layers: int,
+            dec_layers: int,
+            pre_norm: bool,
+            deep_supervision: bool,
+            mask_dim: int,
+            enforce_input_project: bool,
     ):
         """
         NOTE: this interface is experimental.
@@ -87,6 +86,18 @@ class TransformerPredictor(nn.Module):
         if self.mask_classification:
             self.class_embed = nn.Linear(hidden_dim, num_classes + 1)
         self.mask_embed = MLP(hidden_dim, hidden_dim, mask_dim, 3)
+        self.ch_dim = 16
+        self.controller = nn.Linear(hidden_dim, 593)
+        self.bottleneck = Conv2d(
+            mask_dim,
+            self.ch_dim,
+            kernel_size=1,
+            stride=1,
+        )
+        weight_init.c2_xavier_fill(self.bottleneck)
+
+        self.base_norm = get_norm('SyncBN', self.ch_dim + 2)
+
 
     @classmethod
     def from_config(cls, cfg, in_channels, mask_classification):
@@ -118,6 +129,25 @@ class TransformerPredictor(nn.Module):
         mask = None
         hs, memory = self.transformer(self.input_proj(src), mask, self.query_embed.weight, pos)
 
+        base = self.bottleneck(mask_features)
+        b, ch, h, w = base.size()
+        shifts_x = torch.arange(
+            0, 1, step=1 / w,
+            dtype=torch.float32, device='cuda'
+        )
+        shifts_y = torch.arange(
+            0, 1, step=1 / h,
+            dtype=torch.float32, device='cuda'
+        )
+        shift_y, shift_x = torch.meshgrid(shifts_y, shifts_x)
+        coords = torch.stack((shift_x, shift_y), dim=0)
+        base = torch.cat((coords.repeat(b, 1, 1, 1), base), 1)
+        base = self.base_norm(base)
+
+        params = self.controller(hs)
+        l, b, q, _ = params.size()
+        weights, biases = self.get_params(params)
+
         if self.mask_classification:
             outputs_class = self.class_embed(hs)
             out = {"pred_logits": outputs_class[-1]}
@@ -126,8 +156,16 @@ class TransformerPredictor(nn.Module):
 
         if self.aux_loss:
             # [l, bs, queries, embed]
-            mask_embed = self.mask_embed(hs)
-            outputs_seg_masks = torch.einsum("lbqc,bchw->lbqhw", mask_embed, mask_features)
+            conv1 = torch.einsum("lbqoi, bihw -> lbqohw", weights[0].reshape(l, b, q, -1, self.ch_dim + 2), base)
+            conv1 += biases[0][..., None, None]
+            conv1 = F.relu(conv1)
+            conv2 = torch.einsum("lbqoi, lbqihw -> lbqohw", weights[1].reshape(l, b, q, -1, self.ch_dim), conv1)
+            conv2 += biases[1][..., None, None]
+            conv2 = F.relu(conv2)
+            conv3 = torch.einsum("lbqoi, lbqihw -> lbqohw", weights[2].reshape(l, b, q, -1, self.ch_dim), conv2)
+            conv3 += biases[2][..., None, None]
+            outputs_seg_masks = conv3.squeeze(3)
+
             out["pred_masks"] = outputs_seg_masks[-1]
             out["aux_outputs"] = self._set_aux_loss(
                 outputs_class if self.mask_classification else None, outputs_seg_masks
@@ -139,6 +177,17 @@ class TransformerPredictor(nn.Module):
             outputs_seg_masks = torch.einsum("bqc,bchw->bqhw", mask_embed, mask_features)
             out["pred_masks"] = outputs_seg_masks
         return out
+
+    def get_params(self, x):
+        layers, b, num_q, _ = x.size()
+        div = self.ch_dim
+        w0, b0, w1, b1, w2, b2 = torch.split_with_sizes(x, [
+            (2 + div) * div, div,
+            div * div, div,
+            div * 1, 1
+        ], dim=-1)
+
+        return [w0, w1, w2], [b0, b1, b2]
 
     @torch.jit.unused
     def _set_aux_loss(self, outputs_class, outputs_seg_masks):
