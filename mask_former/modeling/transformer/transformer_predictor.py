@@ -85,7 +85,7 @@ class TransformerPredictor(nn.Module):
         # output FFNs
         if self.mask_classification:
             self.class_embed = nn.Linear(hidden_dim, num_classes + 1)
-        self.mask_embed = MLP(hidden_dim, hidden_dim, mask_dim, 3)
+        # self.mask_embed = MLP(hidden_dim, hidden_dim, mask_dim, 3)
         self.ch_dim = 16
         self.controller = nn.Linear(hidden_dim, 593)
         self.bottleneck = Conv2d(
@@ -95,9 +95,7 @@ class TransformerPredictor(nn.Module):
             stride=1,
         )
         weight_init.c2_xavier_fill(self.bottleneck)
-
         self.base_norm = get_norm('SyncBN', self.ch_dim + 2)
-
 
     @classmethod
     def from_config(cls, cfg, in_channels, mask_classification):
