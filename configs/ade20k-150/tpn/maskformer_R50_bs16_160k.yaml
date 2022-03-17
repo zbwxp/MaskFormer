@@ -2,7 +2,8 @@ _BASE_: ../Base-ADE20K-150.yaml
 MODEL:
   META_ARCHITECTURE: "MaskFormer"
   SEM_SEG_HEAD:
-    NAME: "MaskFormerHead"
+    NAME: "TPNHead"
+    PIXEL_DECODER_NAME: "TPNDecoder"
     IN_FEATURES: ["res2", "res3", "res4", "res5"]
     IGNORE_VALUE: 255
     NUM_CLASSES: 150
@@ -13,6 +14,7 @@ MODEL:
     NORM: "GN"
   MASK_FORMER:
     TRANSFORMER_IN_FEATURE: "res5"
+    PREDICTOR: "TPNPredictor"
     DEEP_SUPERVISION: True
     NO_OBJECT_WEIGHT: 0.1
     DICE_WEIGHT: 1.0
@@ -23,5 +25,5 @@ MODEL:
     DROPOUT: 0.1
     DIM_FEEDFORWARD: 2048
     ENC_LAYERS: 0
-    DEC_LAYERS: 6
+    DEC_LAYERS: 4
     PRE_NORM: False

@@ -27,6 +27,7 @@ def add_mask_former_config(cfg):
 
     # mask_former model config
     cfg.MODEL.MASK_FORMER = CN()
+    cfg.MODEL.MASK_FORMER.PREDICTOR = "TransformerPredictor"
 
     # loss
     cfg.MODEL.MASK_FORMER.DEEP_SUPERVISION = True
