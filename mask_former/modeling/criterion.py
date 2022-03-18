@@ -149,7 +149,7 @@ class SetCriterion(nn.Module):
         assert loss in loss_map, f"do you really want to compute {loss} loss?"
         return loss_map[loss](outputs, targets, indices, num_masks)
 
-    def forward(self, outputs, targets):
+    def forward(self, outputs, targets, use_matcher=True):
         """This performs the loss computation.
         Parameters:
              outputs: dict of tensors, see the output specification of the model for the format
@@ -159,8 +159,15 @@ class SetCriterion(nn.Module):
         outputs_without_aux = {k: v for k, v in outputs.items() if k != "aux_outputs"}
 
         # Retrieve the matching between the outputs of the last layer and the targets
-        indices = self.matcher(outputs_without_aux, targets)
-
+        if use_matcher:
+            indices = self.matcher(outputs_without_aux, targets)
+        else:
+            labels = [x['labels'] for x in targets]
+            indices_new = []
+            for label in labels:
+                t = torch.arange(len(label))
+                indices_new.append([label, t])
+            indices = indices_new
         # Compute the average number of target boxes accross all nodes, for normalization purposes
         num_masks = sum(len(t["labels"]) for t in targets)
         num_masks = torch.as_tensor(
@@ -178,7 +185,8 @@ class SetCriterion(nn.Module):
         # In case of auxiliary losses, we repeat this process with the output of each intermediate layer.
         if "aux_outputs" in outputs:
             for i, aux_outputs in enumerate(outputs["aux_outputs"]):
-                indices = self.matcher(aux_outputs, targets)
+                # use the indices as the last stage
+                # indices = self.matcher(aux_outputs, targets)
                 for loss in self.losses:
                     l_dict = self.get_loss(loss, aux_outputs, targets, indices, num_masks)
                     l_dict = {k + f"_{i}": v for k, v in l_dict.items()}

@@ -14,7 +14,7 @@ from detectron2.structures import ImageList
 
 from .modeling.criterion import SetCriterion
 from .modeling.matcher import HungarianMatcher
-
+import matplotlib.pyplot as plt
 
 @META_ARCH_REGISTRY.register()
 class MaskFormer(nn.Module):
@@ -38,6 +38,7 @@ class MaskFormer(nn.Module):
         sem_seg_postprocess_before_inference: bool,
         pixel_mean: Tuple[float],
         pixel_std: Tuple[float],
+        use_matcher: bool,
     ):
         """
         Args:
@@ -69,6 +70,7 @@ class MaskFormer(nn.Module):
         self.panoptic_on = panoptic_on
         self.object_mask_threshold = object_mask_threshold
         self.metadata = metadata
+        self.use_matcher = use_matcher
         if size_divisibility < 0:
             # use backbone size_divisibility if not set
             size_divisibility = self.backbone.size_divisibility
@@ -129,6 +131,7 @@ class MaskFormer(nn.Module):
             ),
             "pixel_mean": cfg.MODEL.PIXEL_MEAN,
             "pixel_std": cfg.MODEL.PIXEL_STD,
+            "use_matcher": cfg.MODEL.MASK_FORMER.USE_MATCHER,
         }
 
     @property
@@ -177,7 +180,7 @@ class MaskFormer(nn.Module):
                 targets = None
 
             # bipartite matching-based loss
-            losses = self.criterion(outputs, targets)
+            losses = self.criterion(outputs, targets, self.use_matcher)
 
             for k in list(losses.keys()):
                 if k in self.criterion.weight_dict:
