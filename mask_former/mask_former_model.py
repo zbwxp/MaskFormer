@@ -165,6 +165,8 @@ class MaskFormer(nn.Module):
                         Each dict contains keys "id", "category_id", "isthing".
         """
         images = [x["image"].to(self.device) for x in batched_inputs]
+        # for calculating flops
+        # images = batched_inputs
         images = [(x - self.pixel_mean) / self.pixel_std for x in images]
         images = ImageList.from_tensors(images, self.size_divisibility)
 
@@ -207,6 +209,9 @@ class MaskFormer(nn.Module):
             ):
                 height = input_per_image.get("height", image_size[0])
                 width = input_per_image.get("width", image_size[1])
+                # for calculating flops
+                # height = image_size[0]
+                # width = image_size[1]
 
                 if self.sem_seg_postprocess_before_inference:
                     mask_pred_result = sem_seg_postprocess(
