@@ -28,6 +28,7 @@ def add_mask_former_config(cfg):
     # mask_former model config
     cfg.MODEL.MASK_FORMER = CN()
     cfg.MODEL.MASK_FORMER.PREDICTOR = "TransformerPredictor"
+    cfg.MODEL.MASK_FORMER.PREDICTOR_REVERSE = False
     cfg.MODEL.MASK_FORMER.USE_MATCHER = True
 
     # loss

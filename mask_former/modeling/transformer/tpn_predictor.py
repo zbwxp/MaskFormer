@@ -7,8 +7,9 @@ from .decoder_attn import *
 
 class TPNPredictor(TransformerPredictor):
     @configurable
-    def __init__(self, **kwargs):
+    def __init__(self, is_reverse, **kwargs):
         super().__init__(**kwargs)
+        self.is_reverse = is_reverse
         dim = kwargs["mask_dim"]
         num_heads = kwargs['nheads']
         num_expand_layer = 3
@@ -38,6 +39,9 @@ class TPNPredictor(TransformerPredictor):
         attns = []
         map_out = self.q.weight.repeat(bs, 1, 1).transpose(0, 1)
         num_query = self.q.num_embeddings
+        if self.is_reverse:
+            maps.reverse()
+            maps_size.reverse()
         for map, decoder, map_size in zip(maps, self.up_decoder, maps_size):
             map_out, attn = decoder(map_out, map)
             map_outs.append(map_out.transpose(0, 1))
@@ -49,8 +53,10 @@ class TPNPredictor(TransformerPredictor):
             out = {"pred_logits": outputs_class[-1]}
         else:
             out = {}
-
-        size = maps_size[-1]
+        if self.is_reverse:
+            size = maps_size[0]
+        else:
+            size = maps_size[-1]
         outputs_seg_masks = []
         for i_attn, attn in enumerate(attns):
             if i_attn == 0:

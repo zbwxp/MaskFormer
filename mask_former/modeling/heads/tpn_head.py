@@ -101,6 +101,7 @@ class TPNHead(nn.Module):
                 if cfg.MODEL.MASK_FORMER.TRANSFORMER_IN_FEATURE == "transformer_encoder"
                 else input_shape[cfg.MODEL.MASK_FORMER.TRANSFORMER_IN_FEATURE].channels,
                 mask_classification=True,
+                is_reverse=cfg.MODEL.MASK_FORMER.PREDICTOR_REVERSE,
             ),
         }
 
