@@ -11,7 +11,7 @@ Usage:
   # download pretrained swin model:
   wget https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_tiny_patch4_window7_224.pth
   # run the conversion
-  ./convert-pretrained-model-to-d2.py swin_tiny_patch4_window7_224.pth swin_tiny_patch4_window7_224.pkl
+  ./convert-pretrained-swin-model-to-d2.py swin_tiny_patch4_window7_224.pth swin_tiny_patch4_window7_224.pkl
   # Then, use swin_tiny_patch4_window7_224.pkl with the following changes in config:
 MODEL:
   WEIGHTS: "/path/to/swin_tiny_patch4_window7_224.pkl"
