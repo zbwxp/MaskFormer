@@ -220,6 +220,16 @@ class MaskFormer(nn.Module):
 
                 # semantic segmentation inference
                 r = self.semantic_inference(mask_cls_result, mask_pred_result)
+
+                # use no cls
+                # r = mask_pred_result.sigmoid()
+                # use gt
+                # gt_idx = batched_inputs[0]['sem_seg'].unique()
+                # gt_idx = gt_idx[gt_idx!=255]
+                # gt_cls = torch.zeros_like(mask_cls_result)[:,0]
+                # gt_cls[gt_idx] = 1
+                # r = mask_pred_result.sigmoid() * gt_cls[:, None, None]
+
                 if not self.sem_seg_postprocess_before_inference:
                     r = sem_seg_postprocess(r, image_size, height, width)
                 processed_results.append({"sem_seg": r})
