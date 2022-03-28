@@ -5,6 +5,7 @@ from detectron2.layers import Conv2d, ShapeSpec, get_norm
 import fvcore.nn.weight_init as weight_init
 from typing import Callable, Dict, List, Optional, Tuple, Union
 import torch.nn as nn
+import torch.nn.functional as F
 import logging
 
 @SEM_SEG_HEADS_REGISTRY.register()
@@ -54,7 +55,13 @@ class TPNDecoder(nn.Module):
         for idx, f in enumerate(self.in_features[::-1]):
             x = features[f]
             lateral_conv = self.lateral_convs[idx]
-            laterals.append(lateral_conv(x))
+        # add laterals before
+            if idx:
+                h, w = x.size()[-2:]
+                out = lateral_conv(x) + F.interpolate(laterals[idx-1], size=(h, w), mode="nearest")
+                laterals.append(out)
+            else:
+                laterals.append(lateral_conv(x))
 
         return laterals, None
 

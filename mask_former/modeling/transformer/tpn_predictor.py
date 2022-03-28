@@ -59,11 +59,12 @@ class TPNPredictor(TransformerPredictor):
             size = maps_size[-1]
         outputs_seg_masks = []
         for i_attn, attn in enumerate(attns):
-            if i_attn == 0:
-                outputs_seg_masks.append(F.interpolate(attn, size=size, mode='bilinear', align_corners=False))
-            else:
-                outputs_seg_masks.append(outputs_seg_masks[i_attn-1] +
-                                F.interpolate(attn, size=size, mode='bilinear', align_corners=False))
+            # if i_attn == 0:
+            #     outputs_seg_masks.append(F.interpolate(attn, size=size, mode='bilinear', align_corners=False))
+            # else:
+            #     outputs_seg_masks.append(outputs_seg_masks[i_attn-1] +
+            #                     F.interpolate(attn, size=size, mode='bilinear', align_corners=False))
+            outputs_seg_masks.append(F.interpolate(attn, size=size, mode='bilinear', align_corners=False))
 
         if self.aux_loss:
             # [l, bs, queries, embed]
