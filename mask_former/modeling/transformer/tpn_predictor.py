@@ -42,6 +42,9 @@ class TPNPredictor(TransformerPredictor):
         if self.is_reverse:
             maps.reverse()
             maps_size.reverse()
+
+        # use 3 stage only
+        maps.pop()
         for map, decoder, map_size in zip(maps, self.up_decoder, maps_size):
             map_out, attn = decoder(map_out, map)
             map_outs.append(map_out.transpose(0, 1))
